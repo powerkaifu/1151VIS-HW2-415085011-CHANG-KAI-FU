@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as d3 from 'd3'
 import { COLOR_MAP } from '../composables/useEnrollmentData.js'
 
@@ -179,7 +179,103 @@ function initChart() {
     }
   })
 
+  // 8️⃣ 直接滾輪縮放監聽（以游標所在位置為中心平滑連續縮放）
+  if (svgRef.value) {
+    svgRef.value.addEventListener('wheel', onWheel, { passive: false })
+  }
+
   isInitialized = true
+}
+
+// ========== 滾輪連續縮放（Direct Mouse Wheel Zooming） ==========
+function onWheel(event) {
+  if (!xScale || !yScale || !mainG) return
+  event.preventDefault()
+  hideTooltip()
+
+  // 取得滑鼠在繪圖區中的座標
+  const pointer = d3.pointer(event, mainG.node())
+  const mx = Math.max(0, Math.min(INNER_W, pointer[0]))
+  const my = Math.max(0, Math.min(INNER_H, pointer[1]))
+
+  // 取得游標對應的資料中心點（Focal Point）
+  const x0 = xScale.invert(mx)
+  const y0 = yScale.invert(my)
+
+  // 縮放係數：向上滾動放大 (0.88)，向下滾動縮小 (1.14)
+  const zoomFactor = event.deltaY < 0 ? 0.88 : 1.14
+
+  const maxQuota = d3.max(props.data, d => d.quota) || 10000
+  const defaultSpanX = maxQuota * 1.05
+  const defaultSpanY = 100
+
+  // 計算新範圍
+  let newXMin = x0 - (x0 - currentXDomain[0]) * zoomFactor
+  let newXMax = x0 + (currentXDomain[1] - x0) * zoomFactor
+  let newYMin = y0 - (y0 - currentYDomain[0]) * zoomFactor
+  let newYMax = y0 + (currentYDomain[1] - y0) * zoomFactor
+
+  let newSpanX = newXMax - newXMin
+  let newSpanY = newYMax - newYMin
+
+  // 1️⃣ 縮小（Zoom Out）極限保護：不可超越預設全景 [0, defaultSpanX] 與 [0, 100]
+  if (zoomFactor > 1) {
+    if (newSpanX >= defaultSpanX && newSpanY >= defaultSpanY) {
+      currentXDomain = [0, defaultSpanX]
+      currentYDomain = [0, 100]
+      isZoomed.value = false
+      updateChart({ animate: false })
+      return
+    }
+  }
+
+  // 2️⃣ 放大（Zoom In）極限保護：最多放大 10 倍（防止過度放大）
+  const minSpanX = defaultSpanX / 10
+  const minSpanY = defaultSpanY / 10
+  if (newSpanX < minSpanX || newSpanY < minSpanY) {
+    return
+  }
+
+  // 3️⃣ 邊界對齊校正（Clamp）：X 介於 0 ~ defaultSpanX，Y 介於 0 ~ 100
+  if (newXMin < 0) {
+    newXMax -= newXMin
+    newXMin = 0
+  }
+  if (newXMax > defaultSpanX && newSpanX < defaultSpanX) {
+    newXMin -= (newXMax - defaultSpanX)
+    newXMax = defaultSpanX
+    if (newXMin < 0) newXMin = 0
+  }
+
+  if (newYMin < 0) {
+    newYMax -= newYMin
+    newYMin = 0
+  }
+  if (newYMax > 100 && newSpanY < 100) {
+    newYMin -= (newYMax - 100)
+    newYMax = 100
+    if (newYMin < 0) newYMin = 0
+  }
+
+  currentXDomain = [newXMin, newXMax]
+  currentYDomain = [newYMin, newYMax]
+
+  // 判斷是否處於放大狀態
+  const isEssentiallyDefault = (
+    Math.abs(currentXDomain[0] - 0) < 1 &&
+    Math.abs(currentXDomain[1] - defaultSpanX) < 1 &&
+    Math.abs(currentYDomain[0] - 0) < 0.5 &&
+    Math.abs(currentYDomain[1] - 100) < 0.5
+  )
+  isZoomed.value = !isEssentiallyDefault
+
+  // 清除可能殘留的 brush 選擇框
+  if (brushGroup) {
+    brushGroup.call(brush.move, null)
+  }
+
+  // 滾輪連續縮放：採用 0ms 即時平滑更新（零延遲，隨手隨到）
+  updateChart({ animate: false })
 }
 
 // ========== 框選事件處理（Brush for Zooming） ==========
@@ -468,6 +564,12 @@ onMounted(() => {
   updateChart({ animate: false })
 })
 
+onUnmounted(() => {
+  if (svgRef.value) {
+    svgRef.value.removeEventListener('wheel', onWheel)
+  }
+})
+
 // 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
 watch(() => props.year, () => {
   if (isZoomed.value) {
@@ -506,7 +608,7 @@ watch(() => props.data, () => {
         </div>
         <p class="chart-subtitle">
           懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
-          <span class="brush-hint">按住滑鼠在圖表上「框選矩形」可直接局部放大特寫</span>
+          <span class="brush-hint">按住左鍵「框選矩形」或「滾動滑鼠滾輪」可直接局部放大特寫</span>
         </p>
       </div>
 
