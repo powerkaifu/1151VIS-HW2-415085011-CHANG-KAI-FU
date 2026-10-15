@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import ScatterPlot from './components/ScatterPlot.vue'
 import TrendLine from './components/TrendLine.vue'
 import { useEnrollmentData } from './composables/useEnrollmentData.js'
@@ -93,10 +93,32 @@ const currentSchoolHistory = computed(() => {
 	return getSchoolHistory(selectedSchool.value)
 })
 
+// 🔍 搜尋下拉浮層狀態與即時候選計算
+const searchIsOpen = ref(false)
+
+const searchSuggestions = computed(() => {
+	const q = searchQuery.value.trim().toLowerCase()
+	if (!q) return []
+	// 若當前搜尋字串與已選中學校完全一致，則不需彈出下拉
+	if (selectedSchool.value && cleanSchoolName(selectedSchool.value).toLowerCase() === q) {
+		return []
+	}
+	return currentYearData.value
+		.filter((d) => cleanSchoolName(d.schoolName).toLowerCase().includes(q))
+		.slice(0, 6)
+})
+
 // 🎯 選取學校處理
 function handleSelectSchool(schoolName) {
 	selectedSchool.value = schoolName
 	searchQuery.value = cleanSchoolName(schoolName)
+	searchIsOpen.value = false
+	searchNoResult.value = false
+}
+
+// 點擊下拉候選學校
+function selectSuggestion(item) {
+	handleSelectSchool(item.schoolName)
 }
 
 // 搜尋輸入監聽
@@ -104,8 +126,10 @@ function handleSearchInput() {
 	searchNoResult.value = false
 	if (!searchQuery.value.trim()) {
 		selectedSchool.value = ''
+		searchIsOpen.value = false
 		return
 	}
+	searchIsOpen.value = true
 	const match = currentYearData.value.find((d) =>
 		cleanSchoolName(d.schoolName).toLowerCase().includes(searchQuery.value.trim().toLowerCase()),
 	)
@@ -114,7 +138,7 @@ function handleSearchInput() {
 		searchNoResult.value = false
 	} else {
 		selectedSchool.value = ''
-		searchNoResult.value = true // 🆕 觸發無結果提示
+		searchNoResult.value = true
 	}
 }
 
@@ -122,7 +146,26 @@ function handleSearchInput() {
 function clearSelectedSchool() {
 	selectedSchool.value = ''
 	searchQuery.value = ''
-	searchNoResult.value = false // 🆕 同步重置
+	searchNoResult.value = false
+	searchIsOpen.value = false
+}
+
+// 📱 視窗滾動感知（判定目前是否處於下方折線圖區間）
+const isScrolledToTrend = ref(false)
+
+function handleScroll() {
+	const trendEl = document.querySelector('.chart-col-sub') || document.querySelector('.trend-card')
+	if (!trendEl) return
+	const rect = trendEl.getBoundingClientRect()
+	// 當折線圖頂部進入視窗上半部時視為已在折線圖區
+	isScrolledToTrend.value = rect.top <= window.innerHeight * 0.45
+}
+
+function handleGlobalClick(e) {
+	const searchEl = document.querySelector('.search-box-wrapper')
+	if (searchEl && !searchEl.contains(e.target)) {
+		searchIsOpen.value = false
+	}
 }
 
 // 平滑滾動至折線圖
@@ -132,6 +175,25 @@ function scrollToTrend() {
 		el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 	}
 }
+
+// 平滑滾動回散佈圖
+function scrollToScatter() {
+	const el = document.querySelector('.chart-col-main') || document.querySelector('.scatter-card')
+	if (el) {
+		el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+	}
+}
+
+// 生命週期監聽
+onMounted(() => {
+	window.addEventListener('scroll', handleScroll, { passive: true })
+	window.addEventListener('click', handleGlobalClick)
+})
+
+onUnmounted(() => {
+	window.removeEventListener('scroll', handleScroll)
+	window.removeEventListener('click', handleGlobalClick)
+})
 </script>
 
 <template>
@@ -171,61 +233,86 @@ function scrollToTrend() {
 
 		<!-- 主要內容區 -->
 		<main v-else class="main-body">
-			<!-- 📰 深度數據新聞導讀區塊（Editorial Hero） -->
-			<section v-if="summaryStats" class="editorial-card">
-				<div class="editorial-icon">📌</div>
-				<div class="editorial-content">
-					<div class="editorial-tag">核心局勢觀察 · {{ selectedYear }} 學年度</div>
-					<p class="editorial-text">{{ editorialInsight }}</p>
-				</div>
-			</section>
-
-			<!-- 關鍵指標卡片群（Hero KPI Stat Cards - 純展示數據摘要） -->
-			<section v-if="summaryStats" class="kpi-grid">
-				<div class="kpi-card">
-					<div class="kpi-header">
-						<span class="kpi-title">大專校院總數</span>
+			<!-- 📰 核心局勢導讀與關鍵指標總覽艙 (Executive Narrative & KPI Hub) -->
+			<section v-if="summaryStats" class="executive-summary-card">
+				<div class="narrative-banner">
+					<div class="narrative-header">
+						<span class="narrative-badge">📌 核心局勢動態觀察</span>
+						<span class="narrative-year">{{ selectedYear }} 學年度</span>
 					</div>
-					<div class="kpi-value-row">
-						<span class="kpi-num">{{ summaryStats.totalSchools }}</span>
-						<span class="kpi-unit">所</span>
-					</div>
-					<div class="kpi-desc">
-						公立 {{ summaryStats.publicSchools }} 所 · 私立 {{ summaryStats.privateSchools }} 所
-					</div>
+					<p class="narrative-text">{{ editorialInsight }}</p>
 				</div>
 
-				<div class="kpi-card highlight">
-					<div class="kpi-header">
-						<span class="kpi-title">公立學校平均</span>
+				<div class="kpi-grid">
+					<div
+						class="kpi-card"
+						:class="{ active: filterType === 'all' }"
+						title="點擊切換顯示全體學校"
+						@click="filterType = 'all'"
+					>
+						<div class="kpi-header">
+							<span class="kpi-title">大專校院總數</span>
+							<span class="kpi-pill gray">全體</span>
+						</div>
+						<div class="kpi-value-row">
+							<span class="kpi-num">{{ summaryStats.totalSchools }}</span>
+							<span class="kpi-unit">所</span>
+						</div>
+						<div class="kpi-desc">
+							公立 {{ summaryStats.publicSchools }} 所 · 私立 {{ summaryStats.privateSchools }} 所
+						</div>
 					</div>
-					<div class="kpi-value-row">
-						<span class="kpi-num text-primary">{{ summaryStats.pubAvg }}</span>
-						<span class="kpi-unit">%</span>
-					</div>
-					<div class="kpi-desc">共 {{ summaryStats.publicSchools }} 所公立學校</div>
-				</div>
 
-				<div class="kpi-card warning">
-					<div class="kpi-header">
-						<span class="kpi-title">私立學校平均</span>
+					<div
+						class="kpi-card highlight"
+						:class="{ active: filterType === 'public' }"
+						title="點擊僅篩選公立學校"
+						@click="filterType = 'public'"
+					>
+						<div class="kpi-header">
+							<span class="kpi-title">公立學校平均</span>
+							<span class="kpi-pill blue">公立</span>
+						</div>
+						<div class="kpi-value-row">
+							<span class="kpi-num text-primary">{{ summaryStats.pubAvg }}</span>
+							<span class="kpi-unit">%</span>
+						</div>
+						<div class="kpi-desc">共 {{ summaryStats.publicSchools }} 所公立學校</div>
 					</div>
-					<div class="kpi-value-row">
-						<span class="kpi-num text-warning">{{ summaryStats.priAvg }}</span>
-						<span class="kpi-unit">%</span>
-					</div>
-					<div class="kpi-desc">與公立平均差距 {{ summaryStats.gap }} 個百分點</div>
-				</div>
 
-				<div class="kpi-card danger">
-					<div class="kpi-header">
-						<span class="kpi-title">未達 60% 學校</span>
+					<div
+						class="kpi-card private-kpi"
+						:class="{ active: filterType === 'private' }"
+						title="點擊僅篩選私立學校"
+						@click="filterType = 'private'"
+					>
+						<div class="kpi-header">
+							<span class="kpi-title">私立學校平均</span>
+							<span class="kpi-pill orange">私立</span>
+						</div>
+						<div class="kpi-value-row">
+							<span class="kpi-num text-orange">{{ summaryStats.priAvg }}</span>
+							<span class="kpi-unit">%</span>
+						</div>
+						<div class="kpi-desc">與公立差距 {{ summaryStats.gap }} 個百分點</div>
 					</div>
-					<div class="kpi-value-row">
-						<span class="kpi-num text-danger">{{ summaryStats.dangerSchools }}</span>
-						<span class="kpi-unit">所</span>
+
+					<div
+						class="kpi-card danger"
+						:class="{ active: filterType === 'danger' }"
+						title="點擊僅篩選未達 60% 關注學校"
+						@click="filterType = 'danger'"
+					>
+						<div class="kpi-header">
+							<span class="kpi-title">未達 60% 學校</span>
+							<span class="kpi-pill red">警戒</span>
+						</div>
+						<div class="kpi-value-row">
+							<span class="kpi-num text-danger">{{ summaryStats.dangerSchools }}</span>
+							<span class="kpi-unit">所</span>
+						</div>
+						<div class="kpi-desc">點擊快速聚焦關注學校</div>
 					</div>
-					<div class="kpi-desc">低於 60% 關注門檻</div>
 				</div>
 			</section>
 
@@ -267,18 +354,37 @@ function scrollToTrend() {
 					</div>
 				</div>
 
-				<!-- 學校搜尋探針 -->
+				<!-- 學校搜尋探針（具備即時下拉選單） -->
 				<div class="toolbar-right">
-					<div class="search-box">
-						<span class="search-icon">🔍</span>
-						<input
-							v-model="searchQuery"
-							type="text"
-							placeholder="搜尋學校（如：臺灣大學、輔仁大學）"
-							class="search-input"
-							@input="handleSearchInput"
-						/>
-						<button v-if="searchQuery" class="search-clear" @click="clearSelectedSchool">✕</button>
+					<div class="search-box-wrapper">
+						<div class="search-box">
+							<span class="search-icon">🔍</span>
+							<input
+								v-model="searchQuery"
+								type="text"
+								placeholder="搜尋學校（如：臺灣大學、輔仁大學）"
+								class="search-input"
+								@input="handleSearchInput"
+								@focus="searchIsOpen = true"
+							/>
+							<button v-if="searchQuery" class="search-clear" @click="clearSelectedSchool">✕</button>
+						</div>
+
+						<!-- 🌟 搜尋即時候選浮層 -->
+						<div v-if="searchIsOpen && searchSuggestions.length" class="search-dropdown-menu">
+							<div
+								v-for="item in searchSuggestions"
+								:key="item.schoolName"
+								class="search-dropdown-item"
+								@click="selectSuggestion(item)"
+							>
+								<span class="item-name">{{ cleanSchoolName(item.schoolName) }}</span>
+								<div class="item-meta">
+									<span class="item-ownership" :class="item.ownership === '公立' ? 'pub' : 'pri'">{{ item.ownership }}</span>
+									<span class="item-rate">{{ item.rate !== null ? `${item.rate.toFixed(1)}%` : '-' }}</span>
+								</div>
+							</div>
+						</div>
 					</div>
 					<!-- 🆕 搜尋無結果提示 -->
 					<p v-if="searchNoResult" class="search-no-result">找不到「{{ searchQuery }}」</p>
@@ -338,11 +444,11 @@ function scrollToTrend() {
 					<span class="toast-badge">★ 已鎖定</span>
 					<span class="toast-title">{{ cleanSchoolName(selectedSchool) }}</span>
 					<span class="toast-divider"></span>
-					<span class="toast-desc">已載入 9 年歷史資料，可滑動至下方折線圖對照走勢</span>
+					<span class="toast-desc">已載入 9 年歷史走勢</span>
 				</div>
 				<div class="toast-actions">
-					<button class="toast-jump-btn" @click="scrollToTrend">
-						👇 前往查看
+					<button class="toast-jump-btn" @click="isScrolledToTrend ? scrollToScatter() : scrollToTrend()">
+						{{ isScrolledToTrend ? '👆 返回散佈圖' : '👇 前往歷年走勢' }}
 					</button>
 					<button class="toast-close-btn" title="解除鎖定" @click="clearSelectedSchool">
 						✕
@@ -466,51 +572,97 @@ body {
 	flex: 1;
 }
 
-/* 📰 深度數據新聞導讀卡 */
-.editorial-card {
-	display: flex;
-	gap: 16px;
-	background: #eff6ff;
-	border: 1px solid #bfdbfe;
-	border-radius: 10px;
-	padding: 16px 22px;
+/* 📰 核心局勢導讀與關鍵指標總覽艙 (Executive Narrative & KPI Hub) */
+.executive-summary-card {
+	background: #ffffff;
+	border: 1px solid #e2e8f0;
+	border-radius: 12px;
+	box-shadow:
+		0 4px 6px -1px rgba(0, 0, 0, 0.04),
+		0 2px 4px -2px rgba(0, 0, 0, 0.02);
 	margin-bottom: 24px;
+	overflow: hidden;
 }
 
-.editorial-icon {
-	font-size: 24px;
-	line-height: 1.3;
+.narrative-banner {
+	background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+	border-bottom: 1px solid #e2e8f0;
+	padding: 18px 24px;
 }
 
-.editorial-tag {
-	font-size: var(--font-md);
+.narrative-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.narrative-badge {
+	font-size: var(--font-xs);
 	font-weight: 800;
 	color: #1e40af;
-	margin-bottom: 8px;
+	background: #dbeafe;
+	padding: 3px 10px;
+	border-radius: 9999px;
 	letter-spacing: 0.01em;
 }
 
-.editorial-text {
+.narrative-year {
+	font-size: var(--font-xs);
+	font-weight: 700;
+	color: #047857;
+	background: #d1fae5;
+	padding: 3px 8px;
+	border-radius: 9999px;
+}
+
+.narrative-text {
 	font-size: var(--font-base);
 	line-height: 1.75;
 	color: #1e3a8a;
 	margin: 0;
+	font-weight: 500;
 }
 
-/* KPI 卡片 */
+/* 4 欄無縫指標群 */
 .kpi-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-	gap: 18px;
-	margin-bottom: 48px;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 1px;
+	background: #e2e8f0; /* 作為內隔線背景 */
+	margin-bottom: 0;
 }
 
 .kpi-card {
 	background: #ffffff;
-	border: 1px solid #e2e8f0;
-	border-radius: 10px;
-	padding: 18px 22px;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+	padding: 20px 24px;
+	cursor: pointer;
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	position: relative;
+}
+
+.kpi-card:hover {
+	background: #f8fafc;
+	transform: translateY(-2px);
+	z-index: 2;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.kpi-card.active {
+	background: #ffffff;
+	box-shadow: inset 0 -3px 0 0 #2563eb;
+}
+
+.kpi-card.highlight.active {
+	box-shadow: inset 0 -3px 0 0 #2563eb;
+}
+
+.kpi-card.private-kpi.active {
+	box-shadow: inset 0 -3px 0 0 #f97316;
+}
+
+.kpi-card.danger.active {
+	box-shadow: inset 0 -3px 0 0 #dc2626;
 }
 
 .kpi-header {
@@ -541,9 +693,9 @@ body {
 	background: #fee2e2;
 	color: #991b1b;
 }
-.kpi-pill.amber {
-	background: #fef3c7;
-	color: #92400e;
+.kpi-pill.orange {
+	background: #fff7ed;
+	color: #c2410c;
 }
 .kpi-pill.blue {
 	background: #eff6ff;
@@ -580,8 +732,8 @@ body {
 .text-danger {
 	color: #dc2626 !important;
 }
-.text-warning {
-	color: #d97706 !important;
+.text-orange {
+	color: #ea580c !important;
 }
 .text-primary {
 	color: #2563eb !important;
@@ -694,6 +846,12 @@ body {
 	font-weight: 700;
 }
 
+/* 搜尋框外層包裝容器 */
+.search-box-wrapper {
+	position: relative;
+	width: auto;
+}
+
 /* 搜尋框 */
 .search-box {
 	position: relative;
@@ -756,6 +914,74 @@ body {
 		opacity: 1;
 		transform: translateY(0);
 	}
+}
+
+/* 🌟 即時搜尋下拉候選浮層 (Search Dropdown Popover) */
+.search-dropdown-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	right: 0;
+	z-index: 60;
+	background: #ffffff;
+	border: 1px solid #cbd5e1;
+	border-radius: 8px;
+	box-shadow:
+		0 10px 25px -5px rgba(0, 0, 0, 0.12),
+		0 8px 10px -6px rgba(0, 0, 0, 0.04);
+	max-height: 260px;
+	overflow-y: auto;
+	padding: 4px;
+}
+
+.search-dropdown-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 8px 12px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.search-dropdown-item:hover {
+	background: #eff6ff;
+}
+
+.item-name {
+	font-size: var(--font-sm);
+	font-weight: 600;
+	color: #0f172a;
+}
+
+.item-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.item-ownership {
+	font-size: var(--font-xs);
+	font-weight: 700;
+	padding: 2px 6px;
+	border-radius: 4px;
+}
+
+.item-ownership.pub {
+	background: #eff6ff;
+	color: #1e40af;
+}
+
+.item-ownership.pri {
+	background: #fff7ed;
+	color: #c2410c;
+}
+
+.item-rate {
+	font-size: var(--font-xs);
+	font-weight: 700;
+	color: #334155;
+	font-variant-numeric: tabular-nums;
 }
 
 /* 核心視覺化雙圖佈局（上下縱向全寬排列，呼吸感充足） */
@@ -897,23 +1123,16 @@ body {
 		padding: 24px 16px 48px;
 	}
 
-	/* 📰 新聞導讀卡自適應 */
-	.editorial-card {
+	/* 📰 核心導讀條自適應 */
+	.narrative-banner {
 		padding: 14px 16px;
-		gap: 12px;
-		margin-bottom: 18px;
 	}
 
-	.editorial-icon {
-		font-size: 20px;
+	.narrative-badge {
+		font-size: var(--font-xs);
 	}
 
-	.editorial-tag {
-		font-size: var(--font-base);
-		margin-bottom: 6px;
-	}
-
-	.editorial-text {
+	.narrative-text {
 		font-size: var(--font-sm);
 		line-height: 1.65;
 	}
@@ -969,6 +1188,10 @@ body {
 		width: 100%;
 		flex-direction: column;
 		align-items: stretch;
+	}
+
+	.search-box-wrapper {
+		width: 100%;
 	}
 
 	.search-box {

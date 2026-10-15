@@ -710,12 +710,13 @@ watch(() => props.data, () => {
           <h2 class="chart-title">各校招生規模與新生註冊率分佈</h2>
           <span v-if="isZoomed" class="zoom-badge">🔍 局部特寫檢視中</span>
         </div>
-        <p class="chart-subtitle">
-          懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
-          <span class="direct-hint">
-            🖱️ <strong>直接互動：</strong>滾輪縮放 · 拖曳平移 · 雙擊重設全景
-          </span>
-        </p>
+        <div class="action-badges-row">
+          <span class="action-pill"><span class="pill-dot"></span>懸停查看明細</span>
+          <span class="action-pill highlight"><span class="pill-dot blue"></span>👆 點擊鎖定歷年走勢</span>
+          <span class="action-pill"><span class="pill-dot"></span>🔍 滾輪局部特寫</span>
+          <span class="action-pill"><span class="pill-dot"></span>✋ 拖曳平移視角</span>
+          <span class="action-pill"><span class="pill-dot"></span>🖱️ 雙擊重設全景</span>
+        </div>
       </div>
 
       <!-- 卡片頂部圖例與控制項 -->
@@ -821,34 +822,45 @@ watch(() => props.data, () => {
   border: 1px solid #bfdbfe;
 }
 
-.chart-subtitle {
-  font-size: var(--font-xs);
-  color: #475569;
-  margin: 0;
-  line-height: 1.5;
+/* 🌟 現代微型操作提示膠囊群（Micro-Pill Badges） */
+.action-badges-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }
 
-.highlight-action {
-  color: #2563eb;
-  font-weight: 600;
-}
-
-.direct-hint {
+.action-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   background: #f1f5f9;
-  color: #334155;
-  padding: 3px 10px;
+  color: #475569;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: var(--font-xs);
   font-weight: 500;
-  margin-left: 4px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
 }
 
-.direct-hint strong {
-  color: #1e293b;
+.action-pill.highlight {
+  background: #eff6ff;
+  color: #1d4ed8;
   font-weight: 700;
+  border-color: #bfdbfe;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.pill-dot.blue {
+  background: #2563eb;
 }
 
 /* 卡片右上方圖例與狀態列 */

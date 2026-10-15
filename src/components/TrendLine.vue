@@ -452,13 +452,11 @@ onUnmounted(() => {
 				<div class="title-row">
 					<h3 class="chart-title">106～114 學年度公私立平均新生註冊率趨勢</h3>
 				</div>
-				<p class="chart-subtitle">
-					<span v-if="selectedSchool" class="active-school-text">
-						已鎖定：<strong>{{ cleanName(selectedSchool) }}</strong> 9 年歷年走勢對照 ·
-					</span>
-					<span>全台大專公私立平均對比 · </span>
-					<span class="interactive-hint">🖱️ 懸停查看各年公私立對比 · 點擊年份切換全站學年度</span>
-				</p>
+				<div class="action-badges-row">
+					<span class="action-pill"><span class="pill-dot"></span>懸停查看公私立數值</span>
+					<span class="action-pill highlight"><span class="pill-dot blue"></span>👆 點擊年份切換學年度</span>
+					<span v-if="selectedSchool" class="action-pill purple"><span class="pill-dot purple-dot"></span>★ 已鎖定：{{ cleanName(selectedSchool) }} 9 年走勢</span>
+				</div>
 			</div>
 
 			<!-- 🌟 右上角統一圖例與觀察標籤 -->
@@ -538,26 +536,56 @@ onUnmounted(() => {
 	letter-spacing: -0.01em;
 }
 
-.chart-subtitle {
-	font-size: var(--font-xs);
-	color: #475569;
-	margin: 0;
-	line-height: 1.5;
+/* 🌟 現代微型操作提示膠囊群（Micro-Pill Badges） */
+.action-badges-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 4px;
 }
 
-.interactive-hint {
+.action-pill {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 6px;
 	background: #f1f5f9;
-	color: #334155;
-	padding: 2px 8px;
+	color: #475569;
+	padding: 4px 10px;
 	border-radius: 6px;
+	font-size: var(--font-xs);
 	font-weight: 500;
+	border: 1px solid #e2e8f0;
+	transition: all 0.15s ease;
 }
 
-.active-school-text strong {
-	color: #7c3aed;
+.action-pill.highlight {
+	background: #eff6ff;
+	color: #1d4ed8;
+	font-weight: 700;
+	border-color: #bfdbfe;
+}
+
+.action-pill.purple {
+	background: #faf5ff;
+	color: #6b21a8;
+	font-weight: 700;
+	border-color: #e9d5ff;
+}
+
+.pill-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #94a3b8;
+}
+
+.pill-dot.blue {
+	background: #2563eb;
+}
+
+.pill-dot.purple-dot {
+	background: #9333ea;
 }
 
 /* 🌟 右上角統一圖例與觀察標籤群組 */
