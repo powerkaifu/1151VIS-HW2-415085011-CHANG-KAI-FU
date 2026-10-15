@@ -122,7 +122,7 @@ function render() {
 		.attr('fill', '#475569')
 		.attr('font-size', 'var(--font-xs)')
 		.attr('font-weight', '600')
-		.text('學年度（點擊刻度或年份切換全站檢視）')
+		.text('學年度')
 
 	g.append('text')
 		.attr('transform', 'rotate(-90)')
@@ -454,7 +454,7 @@ onUnmounted(() => {
 				</div>
 				<div class="action-badges-row">
 					<span class="action-pill"><span class="pill-dot"></span>懸停查看公私立數值</span>
-					<span class="action-pill highlight"><span class="pill-dot blue"></span>👆 點擊年份切換學年度</span>
+					<span class="action-pill highlight"><span class="pill-dot blue"></span>點擊年份切換學年度</span>
 					<span v-if="selectedSchool" class="action-pill purple"><span class="pill-dot purple-dot"></span>★ 已鎖定：{{ cleanName(selectedSchool) }} 9 年走勢</span>
 				</div>
 			</div>

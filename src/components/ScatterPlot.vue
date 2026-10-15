@@ -712,10 +712,10 @@ watch(() => props.data, () => {
         </div>
         <div class="action-badges-row">
           <span class="action-pill"><span class="pill-dot"></span>懸停查看明細</span>
-          <span class="action-pill highlight"><span class="pill-dot blue"></span>👆 點擊鎖定歷年走勢</span>
-          <span class="action-pill"><span class="pill-dot"></span>🔍 滾輪局部特寫</span>
-          <span class="action-pill"><span class="pill-dot"></span>✋ 拖曳平移視角</span>
-          <span class="action-pill"><span class="pill-dot"></span>🖱️ 雙擊重設全景</span>
+          <span class="action-pill highlight"><span class="pill-dot blue"></span>點擊校點鎖定歷年走勢</span>
+          <span class="action-pill"><span class="pill-dot"></span>滾輪局部特寫</span>
+          <span class="action-pill"><span class="pill-dot"></span>拖曳平移視角</span>
+          <span class="action-pill"><span class="pill-dot"></span>雙擊重設全景</span>
         </div>
       </div>
 
