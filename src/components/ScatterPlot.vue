@@ -58,11 +58,22 @@ const HEIGHT = 520
 
 const INNER_W = WIDTH  - MARGIN.left - MARGIN.right
 const INNER_H = HEIGHT - MARGIN.top  - MARGIN.bottom
+const CLIP_PAD = 14 // 容納圓點半徑 (一般 6px，Hover/聚焦時 11px，徹底杜絕邊界截斷)
 
 // 🏷️ 簡化校名
 function cleanName(name) {
   if (!name) return ''
   return name.replace(/學校財團法人/g, '').replace(/財團法人/g, '').replace(/(.+?)\1+/g, '$1').trim()
+}
+
+// 📐 取得預設全景 Domain（給予頂端與左右足夠的視覺呼吸緩衝，徹底避免 100% 滿分校或邊界圓點被截斷）
+function getDefaultDomains() {
+  const maxQuota = d3.max(props.data, d => d.quota) || 10000
+  // X 軸向左預留 2.5% 呼吸緩衝，向右預留 6% 空間
+  const xDom = [-maxQuota * 0.025, maxQuota * 1.06]
+  // Y 軸頂端向上預留 4% 空間 (0 ~ 104%)，讓 100% 註冊率的滿分學校圓點完整優雅地呈現
+  const yDom = [0, 104]
+  return { xDom, yDom, maxQuota }
 }
 
 // ========== D3 實例與結構變數 ==========
@@ -71,7 +82,7 @@ let mainG, gridGroup, dangerGroup, dangerRect, dangerLine, dangerText
 let xAxisGroup, yAxisGroup, brushGroup, dotsGroup, brush
 let xScale, yScale
 let currentXDomain = [0, 10000]
-let currentYDomain = [0, 100]
+let currentYDomain = [0, 104]
 
 // ========== 初始化圖表結構 ==========
 function initChart() {
@@ -80,15 +91,15 @@ function initChart() {
   const svg = d3.select(svgRef.value)
   svg.selectAll('*').remove()
 
-  // 1️⃣ 裁切路徑（Clip Path）：確保放大縮放時，圓點與警示色塊不溢出座標軸邊界
+  // 1️⃣ 裁切路徑（Clip Path）：包含 CLIP_PAD 緩衝區，確保圓點在邊界處完整呈現、放大縮放時不溢出畫布
   const defs = svg.append('defs')
   defs.append('clipPath')
     .attr('id', 'scatter-clip')
     .append('rect')
-    .attr('x', 0)
-    .attr('y', 0)
-    .attr('width', INNER_W)
-    .attr('height', INNER_H)
+    .attr('x', -CLIP_PAD)
+    .attr('y', -CLIP_PAD)
+    .attr('width', INNER_W + CLIP_PAD * 2)
+    .attr('height', INNER_H + CLIP_PAD * 2)
 
   // 2️⃣ 主繪圖群組
   mainG = svg.append('g')
@@ -205,9 +216,9 @@ function onWheel(event) {
   // 縮放係數：向上滾動放大 (0.88)，向下滾動縮小 (1.14)
   const zoomFactor = event.deltaY < 0 ? 0.88 : 1.14
 
-  const maxQuota = d3.max(props.data, d => d.quota) || 10000
-  const defaultSpanX = maxQuota * 1.05
-  const defaultSpanY = 100
+  const { xDom, yDom } = getDefaultDomains()
+  const defaultSpanX = xDom[1] - xDom[0]
+  const defaultSpanY = yDom[1] - yDom[0]
 
   // 計算新範圍
   let newXMin = x0 - (x0 - currentXDomain[0]) * zoomFactor
@@ -218,11 +229,11 @@ function onWheel(event) {
   let newSpanX = newXMax - newXMin
   let newSpanY = newYMax - newYMin
 
-  // 1️⃣ 縮小（Zoom Out）極限保護：不可超越預設全景 [0, defaultSpanX] 與 [0, 100]
+  // 1️⃣ 縮小（Zoom Out）極限保護：不可超越預設全景 [xDom[0], xDom[1]] 與 [yDom[0], yDom[1]]
   if (zoomFactor > 1) {
     if (newSpanX >= defaultSpanX && newSpanY >= defaultSpanY) {
-      currentXDomain = [0, defaultSpanX]
-      currentYDomain = [0, 100]
+      currentXDomain = [...xDom]
+      currentYDomain = [...yDom]
       isZoomed.value = false
       updateChart({ animate: false })
       return
@@ -236,25 +247,25 @@ function onWheel(event) {
     return
   }
 
-  // 3️⃣ 邊界對齊校正（Clamp）：X 介於 0 ~ defaultSpanX，Y 介於 0 ~ 100
-  if (newXMin < 0) {
-    newXMax -= newXMin
-    newXMin = 0
+  // 3️⃣ 邊界對齊校正（Clamp）：X 介於 xDom[0] ~ xDom[1]，Y 介於 yDom[0] ~ yDom[1]
+  if (newXMin < xDom[0]) {
+    newXMax -= (newXMin - xDom[0])
+    newXMin = xDom[0]
   }
-  if (newXMax > defaultSpanX && newSpanX < defaultSpanX) {
-    newXMin -= (newXMax - defaultSpanX)
-    newXMax = defaultSpanX
-    if (newXMin < 0) newXMin = 0
+  if (newXMax > xDom[1] && newSpanX < defaultSpanX) {
+    newXMin -= (newXMax - xDom[1])
+    newXMax = xDom[1]
+    if (newXMin < xDom[0]) newXMin = xDom[0]
   }
 
-  if (newYMin < 0) {
-    newYMax -= newYMin
-    newYMin = 0
+  if (newYMin < yDom[0]) {
+    newYMax -= (newYMin - yDom[0])
+    newYMin = yDom[0]
   }
-  if (newYMax > 100 && newSpanY < 100) {
-    newYMin -= (newYMax - 100)
-    newYMax = 100
-    if (newYMin < 0) newYMin = 0
+  if (newYMax > yDom[1] && newSpanY < defaultSpanY) {
+    newYMin -= (newYMax - yDom[1])
+    newYMax = yDom[1]
+    if (newYMin < yDom[0]) newYMin = yDom[0]
   }
 
   currentXDomain = [newXMin, newXMax]
@@ -262,10 +273,10 @@ function onWheel(event) {
 
   // 判斷是否處於放大狀態
   const isEssentiallyDefault = (
-    Math.abs(currentXDomain[0] - 0) < 1 &&
-    Math.abs(currentXDomain[1] - defaultSpanX) < 1 &&
-    Math.abs(currentYDomain[0] - 0) < 0.5 &&
-    Math.abs(currentYDomain[1] - 100) < 0.5
+    Math.abs(currentXDomain[0] - xDom[0]) < 1 &&
+    Math.abs(currentXDomain[1] - xDom[1]) < 1 &&
+    Math.abs(currentYDomain[0] - yDom[0]) < 0.5 &&
+    Math.abs(currentYDomain[1] - yDom[1]) < 0.5
   )
   isZoomed.value = !isEssentiallyDefault
 
@@ -311,7 +322,7 @@ function onBrushEnd(event) {
   const yB = yScale.invert(y0)
 
   currentXDomain = [Math.max(0, Math.min(xA, xB)), Math.max(xA, xB)]
-  currentYDomain = [Math.max(0, Math.min(yA, yB)), Math.min(100, Math.max(yA, yB))]
+  currentYDomain = [Math.max(0, Math.min(yA, yB)), Math.min(104, Math.max(yA, yB))]
 
   // 清除灰色框選遮罩
   brushGroup.call(brush.move, null)
@@ -322,9 +333,9 @@ function onBrushEnd(event) {
 
 // ========== 還原全景縮放 ==========
 function resetZoom() {
-  const maxQuota = d3.max(props.data, d => d.quota) || 10000
-  currentXDomain = [0, maxQuota * 1.05]
-  currentYDomain = [0, 100]
+  const { xDom, yDom } = getDefaultDomains()
+  currentXDomain = [...xDom]
+  currentYDomain = [...yDom]
   isZoomed.value = false
   updateChart({ animate: true })
 }
@@ -349,9 +360,9 @@ function updateChart(options = { animate: true }) {
 
   // 若尚未縮放，更新預設全景 Domain
   if (!isZoomed.value) {
-    const maxQuota = d3.max(props.data, d => d.quota) || 10000
-    currentXDomain = [0, maxQuota * 1.05]
-    currentYDomain = [0, 100]
+    const { xDom, yDom } = getDefaultDomains()
+    currentXDomain = [...xDom]
+    currentYDomain = [...yDom]
   }
 
   // 2️⃣ 比例尺
@@ -363,33 +374,32 @@ function updateChart(options = { animate: true }) {
     .domain(currentYDomain)
     .range([INNER_H, 0])
 
-  // 3️⃣ 水平背景網格線平滑過渡
+  // 3️⃣ 水平背景網格線平滑過渡（全景時對齊 0~100%，放大時自適應）
+  const gridAxis = d3.axisLeft(yScale).tickSize(-INNER_W).tickFormat('')
+  if (isZoomed.value) {
+    gridAxis.ticks(6)
+  } else {
+    gridAxis.tickValues([0, 20, 40, 60, 80, 100])
+  }
   gridGroup.transition().duration(duration)
-    .call(
-      d3.axisLeft(yScale)
-        .ticks(5)
-        .tickSize(-INNER_W)
-        .tickFormat('')
-    )
+    .call(gridAxis)
     .selectAll('line')
     .attr('stroke', '#f1f5f9')
     .attr('stroke-width', 1)
   gridGroup.select('.domain').remove()
 
   // 4️⃣ 坐標軸刻度平滑過渡
-  xAxisGroup.transition().duration(duration)
-    .call(
-      d3.axisBottom(xScale)
-        .ticks(6)
-        .tickFormat(d => d >= 10000 ? `${d / 1000}k` : d.toLocaleString())
-    )
+  const xAxis = d3.axisBottom(xScale).ticks(6)
+    .tickFormat(d => d < 0 ? '' : (d >= 10000 ? `${d / 1000}k` : d.toLocaleString()))
+  xAxisGroup.transition().duration(duration).call(xAxis)
 
-  yAxisGroup.transition().duration(duration)
-    .call(
-      d3.axisLeft(yScale)
-        .ticks(8)
-        .tickFormat(d => `${d}%`)
-    )
+  const yAxis = d3.axisLeft(yScale)
+  if (isZoomed.value) {
+    yAxis.ticks(8).tickFormat(d => `${d.toFixed(d % 1 === 0 ? 0 : 1)}%`)
+  } else {
+    yAxis.tickValues([0, 20, 40, 60, 80, 100]).tickFormat(d => `${d}%`)
+  }
+  yAxisGroup.transition().duration(duration).call(yAxis)
 
   // 5️⃣ 60% 退場警戒區間動態更新
   const dangerY = yScale(props.dangerThreshold)
@@ -574,9 +584,9 @@ onUnmounted(() => {
 watch(() => props.year, () => {
   if (isZoomed.value) {
     isZoomed.value = false
-    const maxQuota = d3.max(props.data, d => d.quota) || 10000
-    currentXDomain = [0, maxQuota * 1.05]
-    currentYDomain = [0, 100]
+    const { xDom, yDom } = getDefaultDomains()
+    currentXDomain = [...xDom]
+    currentYDomain = [...yDom]
   }
   updateChart({ animate: true })
 })
