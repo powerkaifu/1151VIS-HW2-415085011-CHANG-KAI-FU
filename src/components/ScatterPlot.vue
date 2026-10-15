@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import * as d3 from 'd3'
 import { COLOR_MAP } from '../composables/useEnrollmentData.js'
 
@@ -35,8 +35,10 @@ const props = defineProps({
   },
 })
 
+// 縮放狀態
+const isZoomed = ref(false)
+
 // 計算篩選後是否有有效資料（用於 Empty State）
-import { computed } from 'vue'
 const filteredCount = computed(() => {
   let d = props.data.filter(d => d.rate !== null && d.quota !== null && d.quota > 0)
   if (props.filterType === 'public') d = d.filter(d => d.ownership === '公立')
@@ -46,7 +48,7 @@ const filteredCount = computed(() => {
 })
 
 // ========== DOM 參照 ==========
-const svgRef     = ref(null)
+const svgRef = ref(null)
 const tooltipRef = ref(null)
 
 // ========== 圖表常數（Margin Convention） ==========
@@ -63,76 +65,75 @@ function cleanName(name) {
   return name.replace(/學校財團法人/g, '').replace(/財團法人/g, '').replace(/(.+?)\1+/g, '$1').trim()
 }
 
-// ========== 繪圖邏輯 ==========
-function render() {
-  if (!svgRef.value || !props.data.length) return
+// ========== D3 實例與結構變數 ==========
+let isInitialized = false
+let mainG, gridGroup, dangerGroup, dangerRect, dangerLine, dangerText
+let xAxisGroup, yAxisGroup, brushGroup, dotsGroup, brush
+let xScale, yScale
+let currentXDomain = [0, 10000]
+let currentYDomain = [0, 100]
+
+// ========== 初始化圖表結構 ==========
+function initChart() {
+  if (!svgRef.value || isInitialized) return
 
   const svg = d3.select(svgRef.value)
   svg.selectAll('*').remove()
 
-  const g = svg
-    .append('g')
+  // 1️⃣ 裁切路徑（Clip Path）：確保放大縮放時，圓點與警示色塊不溢出座標軸邊界
+  const defs = svg.append('defs')
+  defs.append('clipPath')
+    .attr('id', 'scatter-clip')
+    .append('rect')
+    .attr('x', 0)
+    .attr('y', 0)
+    .attr('width', INNER_W)
+    .attr('height', INNER_H)
+
+  // 2️⃣ 主繪圖群組
+  mainG = svg.append('g')
     .attr('transform', `translate(${MARGIN.left},${MARGIN.top})`)
 
-  // 1️⃣ 過濾有效資料
-  let validData = props.data.filter(
-    d => d.rate !== null && d.quota !== null && d.quota > 0
-  )
-
-  // 根據 filterType 過濾
-  if (props.filterType === 'public') {
-    validData = validData.filter(d => d.ownership === '公立')
-  } else if (props.filterType === 'private') {
-    validData = validData.filter(d => d.ownership === '私立')
-  } else if (props.filterType === 'danger') {
-    validData = validData.filter(d => d.rate < props.dangerThreshold)
-  }
-
-  // 2️⃣ 比例尺
-  const maxQuota = d3.max(props.data, d => d.quota) || 10000
-  const xScale = d3.scaleLinear()
-    .domain([0, maxQuota * 1.05])
-    .range([0, INNER_W])
-    .nice()
-
-  const yScale = d3.scaleLinear()
-    .domain([0, 100])  // 嚴守 0~100% 完整軸
-    .range([INNER_H, 0])
-
-  // 3️⃣ 水平背景網格線
-  g.append('g')
+  // 3️⃣ 水平網格線層
+  gridGroup = mainG.append('g')
     .attr('class', 'grid-lines')
-    .call(
-      d3.axisLeft(yScale)
-        .ticks(5)
-        .tickSize(-INNER_W)
-        .tickFormat('')
-    )
-    .selectAll('line')
-    .attr('stroke', '#f1f5f9')
-    .attr('stroke-width', 1)
-  g.select('.grid-lines .domain').remove()
 
-  // 4️⃣ 坐標軸刻度
-  g.append('g')
+  // 4️⃣ 退場警戒區間（裁切範圍內）
+  dangerGroup = mainG.append('g')
+    .attr('class', 'danger-group')
+    .attr('clip-path', 'url(#scatter-clip)')
+
+  dangerRect = dangerGroup.append('rect')
+    .attr('x', 0)
+    .attr('width', INNER_W)
+    .attr('fill', '#ef4444')
+    .attr('fill-opacity', 0.04)
+
+  dangerLine = dangerGroup.append('line')
+    .attr('x1', 0)
+    .attr('x2', INNER_W)
+    .attr('stroke', '#ef4444')
+    .attr('stroke-width', 1.8)
+    .attr('stroke-dasharray', '5,4')
+
+  dangerText = dangerGroup.append('text')
+    .attr('x', INNER_W - 6)
+    .attr('text-anchor', 'end')
+    .attr('fill', '#dc2626')
+    .attr('font-size', 'var(--font-xs)')
+    .attr('font-weight', '700')
+    .text(`⚠️ ${props.dangerThreshold}% 關注門檻`)
+
+  // 5️⃣ 坐標軸刻度層
+  xAxisGroup = mainG.append('g')
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${INNER_H})`)
-    .call(
-      d3.axisBottom(xScale)
-        .ticks(6)
-        .tickFormat(d => d >= 10000 ? `${d / 1000}k` : d.toLocaleString())
-    )
 
-  g.append('g')
+  yAxisGroup = mainG.append('g')
     .attr('class', 'y-axis')
-    .call(
-      d3.axisLeft(yScale)
-        .ticks(10)
-        .tickFormat(d => `${d}%`)
-    )
 
   // 坐標軸標籤
-  g.append('text')
+  mainG.append('text')
     .attr('x', INNER_W / 2)
     .attr('y', INNER_H + 54)
     .attr('text-anchor', 'middle')
@@ -141,7 +142,7 @@ function render() {
     .attr('font-weight', '600')
     .text('核定招生名額（人）')
 
-  g.append('text')
+  mainG.append('text')
     .attr('transform', 'rotate(-90)')
     .attr('x', -INNER_H / 2)
     .attr('y', -54)
@@ -151,148 +152,191 @@ function render() {
     .attr('font-weight', '600')
     .text('新生註冊率（%）')
 
-  // 5️⃣ 60% 退場警戒區間底色與虛線
-  g.append('rect')
-    .attr('x', 0)
-    .attr('y', yScale(props.dangerThreshold))
-    .attr('width', INNER_W)
-    .attr('height', INNER_H - yScale(props.dangerThreshold))
-    .attr('fill', '#ef4444')
-    .attr('fill-opacity', 0.04)
+  // 6️⃣ 矩形框選縮放層（Brush Layer，位於圓點層下方，支援滑鼠拖曳框選）
+  brush = d3.brush()
+    .extent([[0, 0], [INNER_W, INNER_H]])
+    .on('start', onBrushStart)
+    .on('end', onBrushEnd)
 
-  g.append('line')
-    .attr('x1', 0)
-    .attr('x2', INNER_W)
-    .attr('y1', yScale(props.dangerThreshold))
-    .attr('y2', yScale(props.dangerThreshold))
-    .attr('stroke', '#ef4444')
-    .attr('stroke-width', 1.8)
-    .attr('stroke-dasharray', '5,4')
+  brushGroup = mainG.append('g')
+    .attr('class', 'brush-layer')
+    .call(brush)
 
-  g.append('text')
-    .attr('x', INNER_W - 6)
-    .attr('y', yScale(props.dangerThreshold) - 10)
-    .attr('text-anchor', 'end')
-    .attr('fill', '#dc2626')
-    .attr('font-size', 'var(--font-xs)')
-    .attr('font-weight', '700')
-    .text(`⚠️ ${props.dangerThreshold}% 關注門檻`)
+  // 7️⃣ 學校資料圓點層（裁切範圍內，避免縮放時溢出畫布）
+  dotsGroup = mainG.append('g')
+    .attr('class', 'dots-layer')
+    .attr('clip-path', 'url(#scatter-clip)')
 
-  // 6️⃣ 工具函式：Tooltip 與焦點管理
-  const tooltip = d3.select(tooltipRef.value)
+  // 雙擊畫布還原縮放
+  svg.on('dblclick', () => {
+    resetZoom()
+  })
+
+  // 點擊空白處重設選取學校
+  svg.on('click', (event) => {
+    if (event.target.tagName !== 'circle') {
+      resetHighlight()
+    }
+  })
+
+  isInitialized = true
+}
+
+// ========== 框選事件處理（Brush for Zooming） ==========
+function onBrushStart() {
+  // 框選開始時暫時關閉圓點滑鼠事件，避免拖曳時與圓點 hover/click 衝突
+  if (dotsGroup) {
+    dotsGroup.selectAll('circle.dot').style('pointer-events', 'none')
+  }
+  hideTooltip()
+}
+
+function onBrushEnd(event) {
+  // 框選結束後恢復圓點事件
+  if (dotsGroup) {
+    dotsGroup.selectAll('circle.dot').style('pointer-events', 'auto')
+  }
+
+  const selection = event.selection
+  if (!selection) return
+
+  const [[x0, y0], [x1, y1]] = selection
+
+  // 容錯判斷：小於 6px 視為單擊或微小誤觸，不觸發縮放
+  if (Math.abs(x1 - x0) < 6 || Math.abs(y1 - y0) < 6) {
+    brushGroup.call(brush.move, null)
+    return
+  }
+
+  // 換算框選矩形對應的新 Domain
+  const xA = xScale.invert(x0)
+  const xB = xScale.invert(x1)
+  const yA = yScale.invert(y1)
+  const yB = yScale.invert(y0)
+
+  currentXDomain = [Math.max(0, Math.min(xA, xB)), Math.max(xA, xB)]
+  currentYDomain = [Math.max(0, Math.min(yA, yB)), Math.min(100, Math.max(yA, yB))]
+
+  // 清除灰色框選遮罩
+  brushGroup.call(brush.move, null)
+
+  isZoomed.value = true
+  updateChart({ animate: true })
+}
+
+// ========== 還原全景縮放 ==========
+function resetZoom() {
+  const maxQuota = d3.max(props.data, d => d.quota) || 10000
+  currentXDomain = [0, maxQuota * 1.05]
+  currentYDomain = [0, 100]
+  isZoomed.value = false
+  updateChart({ animate: true })
+}
+
+// ========== 繪製與平滑動畫更新邏輯 ==========
+function updateChart(options = { animate: true }) {
+  if (!isInitialized || !props.data.length) return
+  const duration = options.animate ? 750 : 0
+
+  // 1️⃣ 過濾有效資料
+  let validData = props.data.filter(
+    d => d.rate !== null && d.quota !== null && d.quota > 0
+  )
+
+  if (props.filterType === 'public') {
+    validData = validData.filter(d => d.ownership === '公立')
+  } else if (props.filterType === 'private') {
+    validData = validData.filter(d => d.ownership === '私立')
+  } else if (props.filterType === 'danger') {
+    validData = validData.filter(d => d.rate < props.dangerThreshold)
+  }
+
+  // 若尚未縮放，更新預設全景 Domain
+  if (!isZoomed.value) {
+    const maxQuota = d3.max(props.data, d => d.quota) || 10000
+    currentXDomain = [0, maxQuota * 1.05]
+    currentYDomain = [0, 100]
+  }
+
+  // 2️⃣ 比例尺
+  xScale = d3.scaleLinear()
+    .domain(currentXDomain)
+    .range([0, INNER_W])
+
+  yScale = d3.scaleLinear()
+    .domain(currentYDomain)
+    .range([INNER_H, 0])
+
+  // 3️⃣ 水平背景網格線平滑過渡
+  gridGroup.transition().duration(duration)
+    .call(
+      d3.axisLeft(yScale)
+        .ticks(5)
+        .tickSize(-INNER_W)
+        .tickFormat('')
+    )
+    .selectAll('line')
+    .attr('stroke', '#f1f5f9')
+    .attr('stroke-width', 1)
+  gridGroup.select('.domain').remove()
+
+  // 4️⃣ 坐標軸刻度平滑過渡
+  xAxisGroup.transition().duration(duration)
+    .call(
+      d3.axisBottom(xScale)
+        .ticks(6)
+        .tickFormat(d => d >= 10000 ? `${d / 1000}k` : d.toLocaleString())
+    )
+
+  yAxisGroup.transition().duration(duration)
+    .call(
+      d3.axisLeft(yScale)
+        .ticks(8)
+        .tickFormat(d => `${d}%`)
+    )
+
+  // 5️⃣ 60% 退場警戒區間動態更新
+  const dangerY = yScale(props.dangerThreshold)
+  dangerRect.transition().duration(duration)
+    .attr('y', Math.max(0, dangerY))
+    .attr('height', Math.max(0, INNER_H - dangerY))
+
+  dangerLine.transition().duration(duration)
+    .attr('y1', dangerY)
+    .attr('y2', dangerY)
+
+  dangerText.transition().duration(duration)
+    .attr('y', dangerY - 10)
+
+  // 6️⃣ 圓點資料綁定與平滑補間動畫（Animated Transitions）
   const hasSelected = !!props.selectedSchool
 
-  function showTooltip(d) {
-    const badgeStyle = getBadgeMeta(d.rateGroup)
-    tooltip
-      .style('opacity', 1)
-      .html(`
-        <div class="tip-header">
-          <span class="tip-title">${cleanName(d.schoolName)}</span>
-          <span class="tip-badge" style="background:${badgeStyle.bg}; color:${badgeStyle.color};">${d.rateGroup}</span>
-        </div>
-        <div class="tip-meta">${d.ownership} · ${d.schoolType}</div>
-        <div class="tip-divider"></div>
-        <div class="tip-grid">
-          <span class="tip-lbl">新生註冊率</span>
-          <span class="tip-val highlight" style="color:${d.rate < 60 ? '#f87171' : (d.rate < 80 ? '#fbbf24' : '#ffffff')}">${d.rate?.toFixed(2)}%</span>
-          <span class="tip-lbl">核定名額</span>
-          <span class="tip-val">${d.quota?.toLocaleString()} 人</span>
-          <span class="tip-lbl">實際註冊</span>
-          <span class="tip-val">${d.enrolled?.toLocaleString()} 人</span>
-          <span class="tip-lbl">名額差額</span>
-          <span class="tip-val">${d.deficit !== null ? (d.deficit > 0 ? `-${d.deficit.toLocaleString()}` : '0') : '無'} 人</span>
-        </div>
-        <div class="tip-action-hint">👆 點擊查看 9 年歷年走勢</div>
-      `)
-
-    // 🌟 真實像素座標縮放計算（適配 SVG viewBox 響應式縮放，徹底杜絕撐出捲動軸）
-    const svgEl = svgRef.value
-    const rect = svgEl ? svgEl.getBoundingClientRect() : { width: WIDTH, height: HEIGHT }
-    const scaleX = rect.width / WIDTH
-    const scaleY = rect.height / HEIGHT
-
-    const realCx = (xScale(d.quota) + MARGIN.left) * scaleX
-    const realCy = (yScale(d.rate) + MARGIN.top) * scaleY
-    const tipWidth = Math.min(300, rect.width - 24)
-    const tipHeight = 220
-
-    // 智慧水平翻轉判定：若右側空間不足容納 tipWidth + 18px，則翻至左側
-    let left = realCx + 18
-    if (left + tipWidth > rect.width - 12) {
-      left = realCx - tipWidth - 18
-    }
-    if (left < 12) left = 12
-
-    let top = realCy - tipHeight / 2
-    if (top < 12) top = 12
-    if (top + tipHeight > rect.height - 12) {
-      top = rect.height - tipHeight - 12
-    }
-
-    tooltip
-      .style('left', `${left}px`)
-      .style('top',  `${top}px`)
-  }
-
-  function hideTooltip() {
-    tooltip.style('opacity', 0)
-  }
-
-  // 焦點切換函式（圓點與標籤文字共用）
-  function highlightTarget(schoolName, d) {
-    dots.attr('fill-opacity', 0.15).attr('stroke-opacity', 0.2)
-    
-    // 聚焦目標圓點（放大、加粗邊框、外發光、置頂）
-    dots.filter(dot => dot.schoolName === schoolName)
-      .raise()
-      .attr('r', 11)
-      .attr('fill-opacity', 1)
-      .attr('stroke', '#0f172a')
-      .attr('stroke-width', 2.8)
-      .style('filter', 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.7))')
-
-    showTooltip(d)
-  }
-
-  function resetHighlight() {
-    dots
-      .attr('r', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? 10 : 6)
-      .attr('fill-opacity', d => {
-        if (!hasSelected) return 0.8
-        return d.schoolName === props.selectedSchool ? 1 : 0.15
-      })
-      .attr('stroke', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? '#0f172a' : '#ffffff')
-      .attr('stroke-width', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? 2.5 : 1)
-      .attr('stroke-opacity', 1)
-      .style('filter', 'none')
-
-    hideTooltip()
-  }
-
-  // 7️⃣ 繪製資料點群組（純粹圓點展示，滑鼠懸停顯示 Tooltip 詳情）
-  const dotsGroup = g.append('g').attr('class', 'dots-group')
-
   const dots = dotsGroup.selectAll('circle.dot')
-    .data(validData, d => `${d.year}-${d.schoolCode}`)
-    .join('circle')
+    .data(validData, d => d.schoolCode || cleanName(d.schoolName))
+
+  // 離開的圓點：平滑淡出並縮小
+  dots.exit()
+    .transition().duration(options.animate ? 400 : 0)
+    .attr('r', 0)
+    .attr('fill-opacity', 0)
+    .remove()
+
+  // 新進入的圓點
+  const enterDots = dots.enter()
+    .append('circle')
     .attr('class', 'dot')
     .attr('cx', d => xScale(d.quota))
     .attr('cy', d => yScale(d.rate))
-    .attr('r', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? 10 : 6)
+    .attr('r', 0)
     .attr('fill', d => COLOR_MAP[d.ownership] ?? '#94a3b8')
-    .attr('fill-opacity', d => {
-      if (!hasSelected) return 0.8
-      return d.schoolName === props.selectedSchool ? 1 : 0.15
-    })
-    .attr('stroke', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? '#0f172a' : '#ffffff')
-    .attr('stroke-width', d => (props.selectedSchool && d.schoolName === props.selectedSchool) ? 2.5 : 1)
+    .attr('fill-opacity', 0)
+    .attr('stroke', '#ffffff')
+    .attr('stroke-width', 1)
     .attr('cursor', 'pointer')
-    // 點擊選取學校
     .on('click', function (event, d) {
+      event.stopPropagation()
       emit('select-school', d.schoolName)
     })
-    // 游標互動
     .on('mouseover', function (event, d) {
       highlightTarget(d.schoolName, d)
     })
@@ -300,12 +344,116 @@ function render() {
       resetHighlight()
     })
 
-  // 點擊畫布空白處重設聚焦與關閉 Tooltip（友善行動觸控操作）
-  svg.on('click', function (event) {
-    if (event.target.tagName !== 'circle') {
-      resetHighlight()
-    }
-  })
+  // 合併更新與新進入的圓點：平滑移動至新座標
+  const merged = enterDots.merge(dots)
+
+  merged.transition().duration(duration)
+    .attr('cx', d => xScale(d.quota))
+    .attr('cy', d => yScale(d.rate))
+    .attr('r', d => (hasSelected && d.schoolName === props.selectedSchool) ? 10 : 6)
+    .attr('fill', d => COLOR_MAP[d.ownership] ?? '#94a3b8')
+    .attr('fill-opacity', d => {
+      if (!hasSelected) return 0.8
+      return d.schoolName === props.selectedSchool ? 1 : 0.15
+    })
+    .attr('stroke', d => (hasSelected && d.schoolName === props.selectedSchool) ? '#0f172a' : '#ffffff')
+    .attr('stroke-width', d => (hasSelected && d.schoolName === props.selectedSchool) ? 2.5 : 1)
+}
+
+// ========== Tooltip 與焦點互動 ==========
+const tooltip = computed(() => d3.select(tooltipRef.value))
+
+function showTooltip(d) {
+  const badgeStyle = getBadgeMeta(d.rateGroup)
+  tooltip.value
+    .style('opacity', 1)
+    .html(`
+      <div class="tip-header">
+        <span class="tip-title">${cleanName(d.schoolName)}</span>
+        <span class="tip-badge" style="background:${badgeStyle.bg}; color:${badgeStyle.color};">${d.rateGroup}</span>
+      </div>
+      <div class="tip-meta">${d.ownership} · ${d.schoolType}</div>
+      <div class="tip-divider"></div>
+      <div class="tip-grid">
+        <span class="tip-lbl">新生註冊率</span>
+        <span class="tip-val highlight" style="color:${d.rate < 60 ? '#f87171' : (d.rate < 80 ? '#fbbf24' : '#ffffff')}">${d.rate?.toFixed(2)}%</span>
+        <span class="tip-lbl">核定名額</span>
+        <span class="tip-val">${d.quota?.toLocaleString()} 人</span>
+        <span class="tip-lbl">實際註冊</span>
+        <span class="tip-val">${d.enrolled?.toLocaleString()} 人</span>
+        <span class="tip-lbl">名額差額</span>
+        <span class="tip-val">${d.deficit !== null ? (d.deficit > 0 ? `-${d.deficit.toLocaleString()}` : '0') : '無'} 人</span>
+      </div>
+      <div class="tip-action-hint">👆 點擊查看 9 年歷年走勢</div>
+    `)
+
+  const svgEl = svgRef.value
+  const rect = svgEl ? svgEl.getBoundingClientRect() : { width: WIDTH, height: HEIGHT }
+  const scaleX = rect.width / WIDTH
+  const scaleY = rect.height / HEIGHT
+
+  const realCx = (xScale(d.quota) + MARGIN.left) * scaleX
+  const realCy = (yScale(d.rate) + MARGIN.top) * scaleY
+  const tipWidth = Math.min(300, rect.width - 24)
+  const tipHeight = 220
+
+  let left = realCx + 18
+  if (left + tipWidth > rect.width - 12) {
+    left = realCx - tipWidth - 18
+  }
+  if (left < 12) left = 12
+
+  let top = realCy - tipHeight / 2
+  if (top < 12) top = 12
+  if (top + tipHeight > rect.height - 12) {
+    top = rect.height - tipHeight - 12
+  }
+
+  tooltip.value
+    .style('left', `${left}px`)
+    .style('top',  `${top}px`)
+}
+
+function hideTooltip() {
+  if (tooltipRef.value) {
+    tooltip.value.style('opacity', 0)
+  }
+}
+
+function highlightTarget(schoolName, d) {
+  if (!dotsGroup) return
+  dotsGroup.selectAll('circle.dot')
+    .attr('fill-opacity', 0.15)
+    .attr('stroke-opacity', 0.2)
+  
+  dotsGroup.selectAll('circle.dot')
+    .filter(dot => dot.schoolName === schoolName)
+    .raise()
+    .attr('r', 11)
+    .attr('fill-opacity', 1)
+    .attr('stroke', '#0f172a')
+    .attr('stroke-width', 2.8)
+    .attr('stroke-opacity', 1)
+    .style('filter', 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.7))')
+
+  showTooltip(d)
+}
+
+function resetHighlight() {
+  if (!dotsGroup) return
+  const hasSelected = !!props.selectedSchool
+  dotsGroup.selectAll('circle.dot')
+    .attr('r', d => (hasSelected && d.schoolName === props.selectedSchool) ? 10 : 6)
+    .attr('fill-opacity', d => {
+      if (!hasSelected) return 0.8
+      return d.schoolName === props.selectedSchool ? 1 : 0.15
+    })
+    .attr('stroke', d => (hasSelected && d.schoolName === props.selectedSchool) ? '#0f172a' : '#ffffff')
+    .attr('stroke-width', d => (hasSelected && d.schoolName === props.selectedSchool) ? 2.5 : 1)
+    .attr('stroke-opacity', 1)
+    .style('filter', 'none')
+
+  hideTooltip()
 }
 
 function getBadgeMeta(level) {
@@ -314,22 +462,67 @@ function getBadgeMeta(level) {
   return { bg: '#dcfce7', color: '#166534' }
 }
 
-watch(() => [props.data, props.year, props.filterType, props.selectedSchool], render, { deep: false })
-onMounted(render)
+// 監聽生命週期與屬性變化
+onMounted(() => {
+  initChart()
+  updateChart({ animate: false })
+})
+
+// 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
+watch(() => props.year, () => {
+  if (isZoomed.value) {
+    isZoomed.value = false
+    const maxQuota = d3.max(props.data, d => d.quota) || 10000
+    currentXDomain = [0, maxQuota * 1.05]
+    currentYDomain = [0, 100]
+  }
+  updateChart({ animate: true })
+})
+
+// 篩選模式切換
+watch(() => props.filterType, () => {
+  updateChart({ animate: true })
+})
+
+// 選取特定學校
+watch(() => props.selectedSchool, () => {
+  resetHighlight()
+})
+
+// 資料集更新（例如剛載入完畢）
+watch(() => props.data, () => {
+  if (!isInitialized) initChart()
+  updateChart({ animate: false })
+}, { deep: false })
 </script>
 
 <template>
   <div class="scatter-card">
     <div class="card-header">
       <div class="header-left">
-        <h2 class="chart-title">各校招生規模與新生註冊率分佈</h2>
+        <div class="title-row">
+          <h2 class="chart-title">各校招生規模與新生註冊率分佈</h2>
+          <span v-if="isZoomed" class="zoom-badge">🔍 局部特寫檢視中</span>
+        </div>
         <p class="chart-subtitle">
-          每個圓點代表一所學校 · 懸停查看詳細資料 · <span class="highlight-action">點擊任一點查看歷年走勢</span>
+          懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
+          <span class="brush-hint">按住滑鼠在圖表上「框選矩形」可直接局部放大特寫</span>
         </p>
       </div>
 
-      <!-- 🌟 乾淨獨立的圖例與狀態標籤（置於卡片頂部，絕不與資料點遮擋衝突） -->
+      <!-- 卡片頂部圖例與控制項 -->
       <div class="header-right">
+        <!-- ⟲ 重設縮放按鈕 -->
+        <button
+          v-if="isZoomed"
+          class="reset-zoom-btn"
+          title="雙擊畫布或點擊此處還原全景"
+          @click="resetZoom"
+        >
+          <span class="btn-icon">⟲</span>
+          重設縮放 (Reset Zoom)
+        </button>
+
         <div class="header-legend">
           <span class="legend-item">
             <span class="legend-dot public"></span>
@@ -358,7 +551,7 @@ onMounted(render)
         :style="{ opacity: filteredCount === 0 ? 0 : 1 }"
       />
 
-      <!-- 🆕 空狀態提示（篩選後無資料） -->
+      <!-- 空狀態提示（篩選後無資料） -->
       <div v-if="filteredCount === 0" class="empty-state">
         <span class="empty-icon">📊</span>
         <p class="empty-text">此學年度無符合篩選條件的學校資料</p>
@@ -392,18 +585,39 @@ onMounted(render)
   gap: 12px;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
 .chart-title {
   font-size: var(--font-md);
   font-weight: 700;
   color: #0f172a;
-  margin: 0 0 4px 0;
+  margin: 0;
   letter-spacing: -0.01em;
+}
+
+.zoom-badge {
+  display: inline-flex;
+  align-items: center;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
 }
 
 .chart-subtitle {
   font-size: var(--font-xs);
   color: #475569;
   margin: 0;
+  line-height: 1.5;
 }
 
 .highlight-action {
@@ -411,12 +625,50 @@ onMounted(render)
   font-weight: 600;
 }
 
-/* 🌟 卡片右上方圖例與狀態列 */
+.brush-hint {
+  color: #0d9488;
+  font-weight: 600;
+}
+
+/* 卡片右上方圖例與狀態列 */
 .header-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+/* ⟲ 重設縮放按鈕 */
+.reset-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.reset-zoom-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+  transform: translateY(-1px);
+}
+
+.reset-zoom-btn:active {
+  transform: translateY(0);
+}
+
+.btn-icon {
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .header-legend {
@@ -458,12 +710,10 @@ onMounted(render)
   border-top: 2px dashed #ef4444;
 }
 
-
-
 .canvas-wrapper {
   position: relative;
   width: 100%;
-  overflow: hidden; /* 🛡️ 徹底禁止畫布內部產生任何水平或垂直捲動軸 */
+  overflow: hidden; /* 徹底禁止畫布內部產生任何水平或垂直捲動軸 */
 }
 
 .chart-svg {
@@ -472,7 +722,20 @@ onMounted(render)
   height: auto;
 }
 
-/* 🆕 空狀態提示卡片 */
+/* D3 Brush 樣式 */
+:deep(.brush-layer .overlay) {
+  cursor: crosshair;
+}
+
+:deep(.brush-layer .selection) {
+  fill: #3b82f6;
+  fill-opacity: 0.16;
+  stroke: #2563eb;
+  stroke-width: 1.5;
+  stroke-dasharray: 4, 3;
+}
+
+/* 空狀態提示卡片 */
 .empty-state {
   position: absolute;
   top: 50%;
@@ -621,10 +884,13 @@ onMounted(render)
     gap: 12px;
   }
 
+  .header-right {
+    justify-content: space-between;
+  }
+
   .header-legend {
-    width: 100%;
+    flex: 1;
     justify-content: space-around;
-    box-sizing: border-box;
     padding: 8px 10px;
   }
 }

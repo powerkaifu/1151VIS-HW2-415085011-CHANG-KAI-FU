@@ -107,7 +107,7 @@ function render() {
 		.attr('y', INNER_H + 44)
 		.attr('text-anchor', 'middle')
 		.attr('fill', '#475569')
-		.attr('font-size', '13.5px')
+		.attr('font-size', 'var(--font-xs)')
 		.attr('font-weight', '600')
 		.text('學年度')
 
@@ -117,7 +117,7 @@ function render() {
 		.attr('y', -46)
 		.attr('text-anchor', 'middle')
 		.attr('fill', '#475569')
-		.attr('font-size', '13.5px')
+		.attr('font-size', 'var(--font-xs)')
 		.attr('font-weight', '600')
 		.text('新生註冊率（%）')
 
