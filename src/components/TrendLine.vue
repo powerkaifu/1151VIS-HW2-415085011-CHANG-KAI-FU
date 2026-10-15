@@ -382,7 +382,7 @@ function showTrendTooltip(year, snapX) {
 		.html(`
 			<div class="tip-header">
 				<span class="tip-title">📅 ${year} 學年度</span>
-				<span class="tip-badge ${isCurrent ? 'active' : ''}">${isCurrent ? '目前檢視中' : '點擊切換'}</span>
+				${isCurrent ? '<span class="tip-badge active">目前選取</span>' : ''}
 			</div>
 			<div class="tip-divider"></div>
 			<div class="tip-grid">
@@ -407,7 +407,7 @@ function showTrendTooltip(year, snapX) {
 						: ''
 				}
 			</div>
-			<div class="tip-action-hint">👆 點擊切換至 ${year} 學年度資料</div>
+			${!isCurrent ? `<div class="tip-action-hint">👆 直接點擊折線圖，散佈圖將切換至 ${year} 學年度</div>` : ''}
 		`)
 
 	const svgEl = svgRef.value
