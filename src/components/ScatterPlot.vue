@@ -569,7 +569,7 @@ function showTooltip(d) {
       <div class="tip-divider"></div>
       <div class="tip-grid">
         <span class="tip-lbl">新生註冊率</span>
-        <span class="tip-val highlight" style="color:${d.rate < 60 ? '#f87171' : (d.rate < 80 ? '#fbbf24' : '#ffffff')}">${d.rate?.toFixed(2)}%</span>
+        <span class="tip-val highlight" style="color:${d.rate < 60 ? '#f87171' : (d.rate < 80 ? '#fbbf24' : '#ffffff')}">${d.rate?.toFixed(1)}%</span>
         <span class="tip-lbl">核定名額</span>
         <span class="tip-val">${d.quota?.toLocaleString()} 人</span>
         <span class="tip-lbl">實際註冊</span>

@@ -40,7 +40,7 @@ const svgRef = ref(null)
 const tooltipRef = ref(null)
 
 // ========== 圖表常數（Margin Convention） ==========
-const MARGIN = { top: 36, right: 38, bottom: 56, left: 62 }
+const MARGIN = { top: 36, right: 60, bottom: 56, left: 62 }
 const WIDTH = 1000
 const HEIGHT = 420
 
@@ -184,13 +184,13 @@ function render() {
 			.attr('stroke-width', (d) => (d.year === props.selectedYear ? 2.5 : 1.8))
 			.attr('stroke-opacity', props.schoolHistory.length ? 0.5 : 1)
 
-		// 末端標籤 (顯示於圓點上方，避免右側邊界遮擋)
+		// 末端標籤 (text-anchor: end 靠右向左排，徹底避免右側邊界遮擋 %)
 		const last = lineData[lineData.length - 1]
 		if (last) {
 			g.append('text')
-				.attr('x', xScale(last.year))
+				.attr('x', xScale(last.year) + 4)
 				.attr('y', yScale(last.avgRate) - 12)
-				.attr('text-anchor', 'middle')
+				.attr('text-anchor', 'end')
 				.attr('font-size', 'var(--font-xs)')
 				.attr('fill', color)
 				.attr('font-weight', '700')
@@ -231,14 +231,14 @@ function render() {
 			.attr('stroke', '#ffffff')
 			.attr('stroke-width', 2.2)
 
-		// 末端專屬標籤（智慧垂直避讓 + 白色防重疊光暈描邊）
+		// 末端專屬標籤（智慧垂直避讓 + text-anchor: end 靠右向左排）
 		const lastSchool = props.schoolHistory[props.schoolHistory.length - 1]
 		if (lastSchool) {
 			const isNearPublic = lastSchool.rate !== null && lastSchool.rate >= 87
 			g.append('text')
-				.attr('x', xScale(lastSchool.year))
+				.attr('x', xScale(lastSchool.year) + 4)
 				.attr('y', isNearPublic ? yScale(lastSchool.rate) + 20 : yScale(lastSchool.rate) - 14)
-				.attr('text-anchor', 'middle')
+				.attr('text-anchor', 'end')
 				.attr('font-size', 'var(--font-xs)')
 				.attr('fill', schoolColor)
 				.attr('font-weight', '700')
@@ -402,7 +402,7 @@ function showTrendTooltip(year, snapX) {
 					school
 						? `
 					<span class="tip-lbl" style="color: #c084fc;">★ ${cleanName(props.selectedSchool)}</span>
-					<span class="tip-val" style="color: #d8b4fe; font-weight:700;">${school.rate.toFixed(2)}%</span>
+					<span class="tip-val" style="color: #d8b4fe; font-weight:700;">${school.rate.toFixed(1)}%</span>
 				`
 						: ''
 				}
@@ -491,7 +491,7 @@ onUnmounted(() => {
 				<span class="box-tag">鎖定校觀察</span>
 				<span class="box-text">
 					{{ cleanName(selectedSchool) }} 在 {{ selectedYear }} 學年度註冊率為
-					<strong>{{ (schoolHistory.find((d) => d.year === selectedYear)?.rate ?? 0).toFixed(2) }}%</strong>
+					<strong>{{ (schoolHistory.find((d) => d.year === selectedYear)?.rate ?? 0).toFixed(1) }}%</strong>
 				</span>
 			</div>
 		</div>
