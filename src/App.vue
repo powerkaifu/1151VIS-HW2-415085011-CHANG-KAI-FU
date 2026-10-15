@@ -143,7 +143,7 @@ function clearSelectedSchool() {
 					</div>
 				</div>
 				<div class="author-meta">
-					<div class="course-label">資料分析與視覺化應用 · HW01</div>
+					<div class="course-label">資料分析與視覺化應用 · HW02</div>
 					<div class="student-info">415085011 張凱富</div>
 				</div>
 			</div>
@@ -308,7 +308,7 @@ function clearSelectedSchool() {
 		<!-- 頁尾 -->
 		<footer class="app-footer">
 			<div class="footer-inner">
-				<p>1151VIS-HW1 資料分析與視覺化應用 · Tamara Munzner 四層巢狀模型實踐作業</p>
+				<p>1151VIS-HW2 資料分析與視覺化應用 · Tamara Munzner 四層巢狀模型實踐作業</p>
 				<p class="footer-source">
 					資料來源：<a
 						href="https://udb.moe.edu.tw/udata/DetailReportList/%E5%AD%B8%E7%94%9F%E9%A1%9E"

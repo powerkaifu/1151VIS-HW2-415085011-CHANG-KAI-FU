@@ -3,6 +3,6 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/1151VIS-HW1-415085011-CHANG-KAI-FU/',
+  base: '/1151VIS-HW2-415085011-CHANG-KAI-FU/',
   plugins: [vue()],
 })

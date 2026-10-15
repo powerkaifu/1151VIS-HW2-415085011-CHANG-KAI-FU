@@ -1,9 +1,9 @@
-# 📝 HW01 作業說明
+# 📝 HW02 作業說明
 
 - **課程名稱**：資料分析與視覺化應用
 - **學號姓名**：415085011 張凱富
-- **GitHub Repository**：[台灣大專校院新生註冊率視覺化分析](https://github.com/powerkaifu/1151VIS-HW1-415085011-CHANG-KAI-FU)
-- **作業網址**：[台灣大專校院新生註冊率視覺化分析](https://powerkaifu.github.io/1151VIS-HW1-415085011-CHANG-KAI-FU/)
+- **GitHub Repository**：[台灣大專校院新生註冊率視覺化分析](https://github.com/powerkaifu/1151VIS-HW2-415085011-CHANG-KAI-FU)
+- **作業網址**：[台灣大專校院新生註冊率視覺化分析](https://powerkaifu.github.io/1151VIS-HW2-415085011-CHANG-KAI-FU/)
 - **影片網址**：[專案展示影片](https://youtu.be/h4qLvrDxdoE)
 - **資料來源**：[教育部大專校院校務資訊公開平臺](https://udb.moe.edu.tw/udata/DetailReportList/%E5%AD%B8%E7%94%9F%E9%A1%9E)
 
