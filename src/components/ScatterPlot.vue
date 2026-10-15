@@ -38,6 +38,9 @@ const props = defineProps({
 // 縮放狀態
 const isZoomed = ref(false)
 
+// 互動模式：'pan' (Photoshop 手掌平移，預設) | 'brush' (矩形框選放大)
+const interactionMode = ref('pan')
+
 // 計算篩選後是否有有效資料（用於 Empty State）
 const filteredCount = computed(() => {
   let d = props.data.filter(d => d.rate !== null && d.quota !== null && d.quota > 0)
@@ -83,6 +86,12 @@ let xAxisGroup, yAxisGroup, brushGroup, dotsGroup, brush
 let xScale, yScale
 let currentXDomain = [0, 10000]
 let currentYDomain = [0, 104]
+
+// 手掌平移拖曳狀態變數（Photoshop Pan）
+let isPanning = false
+let hasDragged = false
+let panStartClientX = 0, panStartClientY = 0
+let panStartXDomain = [0, 10000], panStartYDomain = [0, 104]
 
 // ========== 初始化圖表結構 ==========
 function initChart() {
@@ -195,7 +204,125 @@ function initChart() {
     svgRef.value.addEventListener('wheel', onWheel, { passive: false })
   }
 
+  // 9️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳）
+  svg.on('mousedown', onMouseDown)
+  window.addEventListener('mousemove', onGlobalMouseMove)
+  window.addEventListener('mouseup', onGlobalMouseUp)
+
+  applyInteractionModeStyles()
+
   isInitialized = true
+}
+
+// ========== 互動模式切換（Pan vs Brush） ==========
+function setInteractionMode(mode) {
+  interactionMode.value = mode
+  applyInteractionModeStyles()
+}
+
+function applyInteractionModeStyles() {
+  if (!brushGroup || !svgRef.value) return
+  if (interactionMode.value === 'pan') {
+    brushGroup.style('display', 'none')
+    brushGroup.call(brush.move, null)
+    svgRef.value.style.cursor = 'grab'
+  } else {
+    brushGroup.style('display', 'inline')
+    svgRef.value.style.cursor = 'crosshair'
+  }
+}
+
+// ========== 手掌平移拖曳處理（Photoshop-like Pan & Drag） ==========
+function onMouseDown(event) {
+  if (interactionMode.value !== 'pan') return
+  if (event.button !== 0) return // 僅限滑鼠左鍵平移
+
+  isPanning = true
+  hasDragged = false
+  panStartClientX = event.clientX
+  panStartClientY = event.clientY
+  panStartXDomain = [...currentXDomain]
+  panStartYDomain = [...currentYDomain]
+
+  if (svgRef.value) {
+    svgRef.value.style.cursor = 'grabbing'
+  }
+  hideTooltip()
+}
+
+function onGlobalMouseMove(event) {
+  if (!isPanning || !svgRef.value) return
+
+  const dx = event.clientX - panStartClientX
+  const dy = event.clientY - panStartClientY
+
+  if (Math.hypot(dx, dy) > 4) {
+    hasDragged = true
+  }
+
+  const rect = svgRef.value.getBoundingClientRect()
+  const scaleX = rect.width / WIDTH
+  const scaleY = rect.height / HEIGHT
+
+  const dataDx = (dx / scaleX) * (panStartXDomain[1] - panStartXDomain[0]) / INNER_W
+  const dataDy = (dy / scaleY) * (panStartYDomain[1] - panStartYDomain[0]) / INNER_H
+
+  let newXMin = panStartXDomain[0] - dataDx
+  let newXMax = panStartXDomain[1] - dataDx
+  let newYMin = panStartYDomain[0] + dataDy
+  let newYMax = panStartYDomain[1] + dataDy
+
+  // 邊界防跑出視野保護
+  const { xDom, yDom } = getDefaultDomains()
+  const spanX = panStartXDomain[1] - panStartXDomain[0]
+  const spanY = panStartYDomain[1] - panStartYDomain[0]
+
+  const minAllowedX = xDom[0] - spanX * 0.15
+  const maxAllowedX = xDom[1] + spanX * 0.15
+  const minAllowedY = yDom[0] - spanY * 0.15
+  const maxAllowedY = yDom[1] + spanY * 0.15
+
+  if (newXMin < minAllowedX) {
+    newXMax += (minAllowedX - newXMin)
+    newXMin = minAllowedX
+  }
+  if (newXMax > maxAllowedX) {
+    newXMin -= (newXMax - maxAllowedX)
+    newXMax = maxAllowedX
+  }
+
+  if (newYMin < minAllowedY) {
+    newYMax += (minAllowedY - newYMin)
+    newYMin = minAllowedY
+  }
+  if (newYMax > maxAllowedY) {
+    newYMin -= (newYMax - maxAllowedY)
+    newYMax = maxAllowedY
+  }
+
+  currentXDomain = [newXMin, newXMax]
+  currentYDomain = [newYMin, newYMax]
+
+  const isEssentiallyDefault = (
+    Math.abs(currentXDomain[0] - xDom[0]) < 1 &&
+    Math.abs(currentXDomain[1] - xDom[1]) < 1 &&
+    Math.abs(currentYDomain[0] - yDom[0]) < 0.5 &&
+    Math.abs(currentYDomain[1] - yDom[1]) < 0.5
+  )
+  isZoomed.value = !isEssentiallyDefault
+
+  updateChart({ animate: false })
+}
+
+function onGlobalMouseUp() {
+  if (!isPanning) return
+  isPanning = false
+  if (svgRef.value) {
+    svgRef.value.style.cursor = interactionMode.value === 'pan' ? 'grab' : 'crosshair'
+  }
+  setTimeout(() => {
+    hasDragged = false
+  }, 60)
 }
 
 // ========== 滾輪連續縮放（Direct Mouse Wheel Zooming） ==========
@@ -440,6 +567,7 @@ function updateChart(options = { animate: true }) {
     .attr('stroke-width', 1)
     .attr('cursor', 'pointer')
     .on('click', function (event, d) {
+      if (hasDragged) return
       event.stopPropagation()
       emit('select-school', d.schoolName)
     })
@@ -578,6 +706,8 @@ onUnmounted(() => {
   if (svgRef.value) {
     svgRef.value.removeEventListener('wheel', onWheel)
   }
+  window.removeEventListener('mousemove', onGlobalMouseMove)
+  window.removeEventListener('mouseup', onGlobalMouseUp)
 })
 
 // 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
@@ -618,12 +748,38 @@ watch(() => props.data, () => {
         </div>
         <p class="chart-subtitle">
           懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
-          <span class="brush-hint">按住左鍵「框選矩形」或「滾動滑鼠滾輪」可直接局部放大特寫</span>
+          <span class="brush-hint">
+            {{ interactionMode === 'pan' ? '按住左鍵「手掌平移」· 滾動滾輪「放大縮小」' : '按住左鍵「框選矩形特寫」· 滾動滾輪「放大縮小」' }}
+          </span>
         </p>
       </div>
 
       <!-- 卡片頂部圖例與控制項 -->
       <div class="header-right">
+        <!-- 互動模式切換（Photoshop 手掌平移 vs 矩形框選放大） -->
+        <div class="mode-toggle">
+          <button
+            type="button"
+            class="mode-btn"
+            :class="{ active: interactionMode === 'pan' }"
+            title="手掌平移模式：按住滑鼠左鍵拖曳移動視野，滾動滾輪放大縮小（宛如 Photoshop）"
+            @click="setInteractionMode('pan')"
+          >
+            <span class="mode-icon">✋</span>
+            手掌平移
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            :class="{ active: interactionMode === 'brush' }"
+            title="矩形框選模式：按住滑鼠左鍵拉出矩形框特寫放大"
+            @click="setInteractionMode('brush')"
+          >
+            <span class="mode-icon">⛶</span>
+            框選放大
+          </button>
+        </div>
+
         <!-- ⟲ 重設縮放按鈕 -->
         <button
           v-if="isZoomed"
@@ -750,6 +906,48 @@ watch(() => props.data, () => {
   flex-wrap: wrap;
 }
 
+/* 互動模式切換按鈕群（Photoshop 質感） */
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: #475569;
+  border: none;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.mode-btn:hover {
+  color: #0f172a;
+}
+
+.mode-btn.active {
+  background: #ffffff;
+  color: #2563eb;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.mode-icon {
+  font-size: 15px;
+}
+
 /* ⟲ 重設縮放按鈕 */
 .reset-zoom-btn {
   display: inline-flex;
@@ -832,6 +1030,8 @@ watch(() => props.data, () => {
   display: block;
   width: 100%;
   height: auto;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* D3 Brush 樣式 */
