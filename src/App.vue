@@ -124,6 +124,14 @@ function clearSelectedSchool() {
 	searchQuery.value = ''
 	searchNoResult.value = false // 🆕 同步重置
 }
+
+// 平滑滾動至折線圖
+function scrollToTrend() {
+	const el = document.querySelector('.chart-col-sub') || document.querySelector('.trend-card')
+	if (el) {
+		el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+	}
+}
 </script>
 
 <template>
@@ -322,6 +330,26 @@ function clearSelectedSchool() {
 				</p>
 			</div>
 		</footer>
+
+		<!-- 🌟 鎖定特定學校時的底部浮動引導提示（Floating Toast） -->
+		<Transition name="toast">
+			<div v-if="selectedSchool" class="floating-school-toast">
+				<div class="toast-content">
+					<span class="toast-badge">★ 已鎖定</span>
+					<span class="toast-title">{{ cleanSchoolName(selectedSchool) }}</span>
+					<span class="toast-divider"></span>
+					<span class="toast-desc">已載入 9 年歷史資料，可滑動至下方折線圖對照走勢</span>
+				</div>
+				<div class="toast-actions">
+					<button class="toast-jump-btn" @click="scrollToTrend">
+						👇 前往查看
+					</button>
+					<button class="toast-close-btn" title="解除鎖定" @click="clearSelectedSchool">
+						✕
+					</button>
+				</div>
+			</div>
+		</Transition>
 	</div>
 </template>
 
@@ -977,6 +1005,159 @@ body {
 	.pill-btn {
 		font-size: var(--font-xs);
 		padding: 6px 4px;
+	}
+}
+
+/* 🌟 鎖定學校時底部浮動引導卡（Floating Toast） */
+.floating-school-toast {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 100;
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	background: rgba(15, 23, 42, 0.95);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 9999px;
+	padding: 8px 14px 8px 18px;
+	box-shadow:
+		0 12px 32px -4px rgba(0, 0, 0, 0.35),
+		0 4px 12px -2px rgba(0, 0, 0, 0.2);
+	color: #ffffff;
+	max-width: min(720px, calc(100vw - 32px));
+	box-sizing: border-box;
+}
+
+.toast-content {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: var(--font-xs);
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.toast-badge {
+	background: #7c3aed;
+	color: #ffffff;
+	font-weight: 700;
+	padding: 3px 8px;
+	border-radius: 9999px;
+	font-size: var(--font-xs);
+	flex-shrink: 0;
+}
+
+.toast-title {
+	font-weight: 700;
+	color: #e9d5ff;
+	font-size: var(--font-sm);
+	flex-shrink: 0;
+}
+
+.toast-divider {
+	width: 1px;
+	height: 14px;
+	background: rgba(255, 255, 255, 0.2);
+	flex-shrink: 0;
+}
+
+.toast-desc {
+	color: #cbd5e1;
+	font-size: var(--font-xs);
+	text-overflow: ellipsis;
+	overflow: hidden;
+}
+
+.toast-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.toast-jump-btn {
+	background: #2563eb;
+	color: #ffffff;
+	border: 1px solid #3b82f6;
+	border-radius: 9999px;
+	padding: 6px 14px;
+	font-size: var(--font-xs);
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.toast-jump-btn:hover {
+	background: #1d4ed8;
+	transform: translateY(-1px);
+}
+
+.toast-close-btn {
+	background: rgba(255, 255, 255, 0.1);
+	color: #94a3b8;
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 50%;
+	width: 26px;
+	height: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: var(--font-xs);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.toast-close-btn:hover {
+	background: rgba(255, 255, 255, 0.2);
+	color: #ffffff;
+}
+
+/* Toast 進退場平滑動效 */
+.toast-enter-active,
+.toast-leave-active {
+	transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-enter-from,
+.toast-leave-to {
+	opacity: 0;
+	transform: translate(-50%, 20px) scale(0.95);
+}
+
+/* 📱 行動端適配 */
+@media (max-width: 640px) {
+	.floating-school-toast {
+		border-radius: 14px;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 10px;
+		padding: 12px 14px;
+		bottom: 16px;
+	}
+
+	.toast-content {
+		flex-wrap: wrap;
+		white-space: normal;
+	}
+
+	.toast-divider {
+		display: none;
+	}
+
+	.toast-actions {
+		justify-content: space-between;
+	}
+
+	.toast-jump-btn {
+		flex: 1;
+		justify-content: center;
 	}
 }
 </style>
