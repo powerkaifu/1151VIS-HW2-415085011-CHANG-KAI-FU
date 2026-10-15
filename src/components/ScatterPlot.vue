@@ -38,9 +38,6 @@ const props = defineProps({
 // 縮放狀態
 const isZoomed = ref(false)
 
-// 是否按下 Shift 鍵（直接按住 Shift+拖曳即可框選放大，無需任何按鈕切換）
-let isShiftPressed = false
-
 // 計算篩選後是否有有效資料（用於 Empty State）
 const filteredCount = computed(() => {
   let d = props.data.filter(d => d.rate !== null && d.quota !== null && d.quota > 0)
@@ -82,7 +79,7 @@ function getDefaultDomains() {
 // ========== D3 實例與結構變數 ==========
 let isInitialized = false
 let mainG, gridGroup, dangerGroup, dangerRect, dangerLine, dangerText
-let xAxisGroup, yAxisGroup, brushGroup, dotsGroup, brush
+let xAxisGroup, yAxisGroup, dotsGroup
 let xScale, yScale
 let currentXDomain = [0, 10000]
 let currentYDomain = [0, 104]
@@ -172,18 +169,7 @@ function initChart() {
     .attr('font-weight', '600')
     .text('新生註冊率（%）')
 
-  // 6️⃣ 矩形框選縮放層（Brush Layer，位於圓點層下方，支援滑鼠拖曳框選）
-  brush = d3.brush()
-    .extent([[0, 0], [INNER_W, INNER_H]])
-    .on('start', onBrushStart)
-    .on('end', onBrushEnd)
-
-  brushGroup = mainG.append('g')
-    .attr('class', 'brush-layer')
-    .style('pointer-events', 'none')
-    .call(brush)
-
-  // 7️⃣ 學校資料圓點層（裁切範圍內，避免縮放時溢出畫布）
+  // 6️⃣ 學校資料圓點層（裁切範圍內，避免縮放時溢出畫布）
   dotsGroup = mainG.append('g')
     .attr('class', 'dots-layer')
     .attr('clip-path', 'url(#scatter-clip)')
@@ -200,61 +186,22 @@ function initChart() {
     }
   })
 
-  // 8️⃣ 直接滾輪縮放監聽（以游標所在位置為中心平滑連續縮放）
+  // 7️⃣ 直接滾輪縮放監聽（以游標所在位置為中心平滑連續縮放）
   if (svgRef.value) {
     svgRef.value.addEventListener('wheel', onWheel, { passive: false })
     svgRef.value.style.cursor = 'grab'
   }
 
-  // 9️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳，無需按鈕）
+  // 8️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳）
   svg.on('mousedown', onMouseDown)
   window.addEventListener('mousemove', onGlobalMouseMove)
   window.addEventListener('mouseup', onGlobalMouseUp)
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
-  window.addEventListener('blur', onWindowBlur)
 
   isInitialized = true
 }
 
-// ========== 鍵盤 Shift 切換框選特寫（Shift + Drag = Brush Zoom） ==========
-function onKeyDown(event) {
-  if (event.key === 'Shift' && !isShiftPressed) {
-    isShiftPressed = true
-    if (brushGroup) {
-      brushGroup.style('pointer-events', 'all')
-    }
-    if (svgRef.value && !isPanning) {
-      svgRef.value.style.cursor = 'crosshair'
-    }
-  }
-}
-
-function onKeyUp(event) {
-  if (event.key === 'Shift') {
-    isShiftPressed = false
-    if (brushGroup) {
-      brushGroup.style('pointer-events', 'none')
-    }
-    if (svgRef.value && !isPanning) {
-      svgRef.value.style.cursor = 'grab'
-    }
-  }
-}
-
-function onWindowBlur() {
-  isShiftPressed = false
-  if (brushGroup) {
-    brushGroup.style('pointer-events', 'none')
-  }
-  if (svgRef.value && !isPanning) {
-    svgRef.value.style.cursor = 'grab'
-  }
-}
-
 // ========== 手掌平移拖曳處理（Photoshop-like Pan & Drag） ==========
 function onMouseDown(event) {
-  if (event.shiftKey) return // 若按住 Shift 鍵，交由 Brush 圖層進行矩形框選
   if (event.button !== 0) return // 僅限滑鼠左鍵平移
 
   isPanning = true
@@ -338,7 +285,7 @@ function onGlobalMouseUp() {
   if (!isPanning) return
   isPanning = false
   if (svgRef.value) {
-    svgRef.value.style.cursor = isShiftPressed ? 'crosshair' : 'grab'
+    svgRef.value.style.cursor = 'grab'
   }
   setTimeout(() => {
     hasDragged = false
@@ -427,61 +374,8 @@ function onWheel(event) {
   )
   isZoomed.value = !isEssentiallyDefault
 
-  // 清除可能殘留的 brush 選擇框
-  if (brushGroup) {
-    brushGroup.call(brush.move, null)
-  }
-
   // 滾輪連續縮放：採用 0ms 即時平滑更新（零延遲，隨手隨到）
   updateChart({ animate: false })
-}
-
-// ========== 框選事件處理（Brush for Zooming） ==========
-function onBrushStart() {
-  // 框選開始時暫時關閉圓點滑鼠事件，避免拖曳時與圓點 hover/click 衝突
-  if (dotsGroup) {
-    dotsGroup.selectAll('circle.dot').style('pointer-events', 'none')
-  }
-  hideTooltip()
-}
-
-function onBrushEnd(event) {
-  // 框選結束後恢復圓點事件
-  if (dotsGroup) {
-    dotsGroup.selectAll('circle.dot').style('pointer-events', 'auto')
-  }
-
-  const selection = event.selection
-  if (!selection) return
-
-  const [[x0, y0], [x1, y1]] = selection
-
-  // 容錯判斷：小於 6px 視為單擊或微小誤觸，不觸發縮放
-  if (Math.abs(x1 - x0) < 6 || Math.abs(y1 - y0) < 6) {
-    brushGroup.call(brush.move, null)
-    return
-  }
-
-  // 換算框選矩形對應的新 Domain
-  const xA = xScale.invert(x0)
-  const xB = xScale.invert(x1)
-  const yA = yScale.invert(y1)
-  const yB = yScale.invert(y0)
-
-  currentXDomain = [Math.max(0, Math.min(xA, xB)), Math.max(xA, xB)]
-  currentYDomain = [Math.max(0, Math.min(yA, yB)), Math.min(104, Math.max(yA, yB))]
-
-  // 清除灰色框選遮罩
-  brushGroup.call(brush.move, null)
-  if (!isShiftPressed) {
-    brushGroup.style('pointer-events', 'none')
-    if (svgRef.value) {
-      svgRef.value.style.cursor = 'grab'
-    }
-  }
-
-  isZoomed.value = true
-  updateChart({ animate: true })
 }
 
 // ========== 還原全景縮放 ==========
@@ -734,9 +628,6 @@ onUnmounted(() => {
   }
   window.removeEventListener('mousemove', onGlobalMouseMove)
   window.removeEventListener('mouseup', onGlobalMouseUp)
-  window.removeEventListener('keydown', onKeyDown)
-  window.removeEventListener('keyup', onKeyUp)
-  window.removeEventListener('blur', onWindowBlur)
 })
 
 // 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
@@ -778,7 +669,7 @@ watch(() => props.data, () => {
         <p class="chart-subtitle">
           懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
           <span class="direct-hint">
-            🖱️ <strong>直接互動：</strong>滾輪縮放 · 拖曳平移 · Shift+拖曳框選 · 雙擊重設全景
+            🖱️ <strong>直接互動：</strong>滾輪縮放 · 拖曳平移 · 雙擊重設全景
           </span>
         </p>
       </div>
@@ -1010,18 +901,6 @@ watch(() => props.data, () => {
   -webkit-user-select: none;
 }
 
-/* D3 Brush 樣式 */
-:deep(.brush-layer .overlay) {
-  cursor: crosshair;
-}
-
-:deep(.brush-layer .selection) {
-  fill: #3b82f6;
-  fill-opacity: 0.16;
-  stroke: #2563eb;
-  stroke-width: 1.5;
-  stroke-dasharray: 4, 3;
-}
 
 /* 空狀態提示卡片 */
 .empty-state {
