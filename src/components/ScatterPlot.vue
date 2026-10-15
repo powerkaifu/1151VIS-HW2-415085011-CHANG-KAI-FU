@@ -189,7 +189,8 @@ function initChart() {
   svg.on('click', (event) => {
     if (event.detail > 1) return // 忽略雙擊序列產生的第二個 click
     if (hasDragged) return
-    if (event.target.tagName !== 'circle') {
+    const isCircle = event.target.tagName === 'circle' || event.target.classList?.contains('dot')
+    if (!isCircle) {
       if (singleClickTimer) clearTimeout(singleClickTimer)
       singleClickTimer = setTimeout(() => {
         if (props.selectedSchool) {
@@ -242,15 +243,9 @@ function onMouseDown(event) {
   panStartYDomain = [...currentYDomain]
   cachedDefaultDomains = getDefaultDomains()
 
-  // 平移拖曳開始時暫時關閉圓點滑鼠事件，徹底杜絕拖曳時 Tooltip 閃現
-  if (dotsGroup) {
-    dotsGroup.style('pointer-events', 'none')
-  }
-
   if (svgRef.value) {
     svgRef.value.style.cursor = 'grabbing'
   }
-  hideTooltip()
 }
 
 function onGlobalMouseMove(event) {
@@ -259,8 +254,13 @@ function onGlobalMouseMove(event) {
   const dx = event.clientX - panStartClientX
   const dy = event.clientY - panStartClientY
 
+  // 移動超過 4px 確認為拖曳行為，此時才暫時關閉圓點事件防止 Tooltip 閃爍
   if (Math.hypot(dx, dy) > 4) {
     hasDragged = true
+    if (dotsGroup) {
+      dotsGroup.style('pointer-events', 'none')
+    }
+    hideTooltip()
   }
 
   // 🛡️ 全景未放大狀態下鎖定平移，防止圖表被拖離畫布產生大片空白
@@ -311,12 +311,12 @@ function onGlobalMouseUp() {
   if (svgRef.value) {
     svgRef.value.style.cursor = 'grab'
   }
+  if (dotsGroup) {
+    dotsGroup.style('pointer-events', 'auto')
+  }
   setTimeout(() => {
     hasDragged = false
-    if (dotsGroup) {
-      dotsGroup.style('pointer-events', 'auto')
-    }
-  }, 60)
+  }, 80)
 }
 
 // ========== 滾輪連續縮放（Direct Mouse Wheel Zooming） ==========
@@ -512,24 +512,24 @@ function updateChart(options = { animate: true }) {
     .attr('fill-opacity', 0)
     .attr('stroke', '#ffffff')
     .attr('stroke-width', 1)
+
+  // 合併更新與新進入的圓點：平滑移動至新座標並綁定互動事件
+  const merged = enterDots.merge(dots)
     .attr('cursor', 'pointer')
     .on('click', function (event, d) {
-      if (hasDragged || isPanning) return
+      if (hasDragged) return
       event.stopPropagation()
       emit('select-school', d.schoolName)
       highlightTarget(d.schoolName, d)
     })
     .on('mouseover', function (event, d) {
-      if (isPanning || hasDragged) return
+      if (hasDragged) return
       highlightTarget(d.schoolName, d)
     })
     .on('mouseleave', function () {
-      if (isPanning) return
+      if (hasDragged) return
       resetHighlight()
     })
-
-  // 合併更新與新進入的圓點：平滑移動至新座標
-  const merged = enterDots.merge(dots)
 
   merged.transition().duration(duration)
     .attr('cx', d => xScale(d.quota))

@@ -205,17 +205,19 @@ function render() {
 	}
 
 	// 8️⃣ 🌟 若選取了特定學校，繪製專屬第三條歷史軌跡！
-	if (props.schoolHistory.length > 1) {
+	if (props.schoolHistory.length >= 1) {
 		const schoolColor = '#7c3aed' // 鮮明紫色專屬標記
 
-		// 專屬折線
-		g.append('path')
-			.datum(props.schoolHistory)
-			.attr('class', 'line-school')
-			.attr('fill', 'none')
-			.attr('stroke', schoolColor)
-			.attr('stroke-width', 3.2)
-			.attr('d', lineGen)
+		// 專屬折線（多於 1 個學年度時繪製連線）
+		if (props.schoolHistory.length > 1) {
+			g.append('path')
+				.datum(props.schoolHistory)
+				.attr('class', 'line-school')
+				.attr('fill', 'none')
+				.attr('stroke', schoolColor)
+				.attr('stroke-width', 3.2)
+				.attr('d', lineGen)
+		}
 
 		// 專屬資料點
 		g.selectAll('.dot-school')
