@@ -89,6 +89,8 @@ let isPanning = false
 let hasDragged = false
 let panStartClientX = 0, panStartClientY = 0
 let panStartXDomain = [0, 10000], panStartYDomain = [0, 104]
+let singleClickTimer = null
+let cachedDefaultDomains = null
 
 // ========== 初始化圖表結構 ==========
 function initChart() {
@@ -174,15 +176,25 @@ function initChart() {
     .attr('class', 'dots-layer')
     .attr('clip-path', 'url(#scatter-clip)')
 
-  // 雙擊畫布還原縮放
+  // 雙擊畫布還原縮放（具備單擊計時防抖，絕不誤抹除選定學校）
   svg.on('dblclick', () => {
+    if (singleClickTimer) {
+      clearTimeout(singleClickTimer)
+      singleClickTimer = null
+    }
     resetZoom()
   })
 
-  // 點擊空白處重設選取學校
+  // 點擊空白處重設選取學校（延遲 220ms，並在雙擊時自動取消）
   svg.on('click', (event) => {
+    if (event.detail > 1) return // 忽略雙擊序列產生的第二個 click
+    if (hasDragged) return
     if (event.target.tagName !== 'circle') {
-      resetHighlight()
+      if (singleClickTimer) clearTimeout(singleClickTimer)
+      singleClickTimer = setTimeout(() => {
+        resetHighlight()
+        singleClickTimer = null
+      }, 220)
     }
   })
 
@@ -196,8 +208,23 @@ function initChart() {
   svg.on('mousedown', onMouseDown)
   window.addEventListener('mousemove', onGlobalMouseMove)
   window.addEventListener('mouseup', onGlobalMouseUp)
+  window.addEventListener('blur', onWindowBlur)
 
   isInitialized = true
+}
+
+// ========== 視窗失去焦點保護（防止滑鼠按住切換視窗時游標殘留） ==========
+function onWindowBlur() {
+  if (isPanning) {
+    isPanning = false
+    hasDragged = false
+    if (svgRef.value) {
+      svgRef.value.style.cursor = 'grab'
+    }
+    if (dotsGroup) {
+      dotsGroup.style('pointer-events', 'auto')
+    }
+  }
 }
 
 // ========== 手掌平移拖曳處理（Photoshop-like Pan & Drag） ==========
@@ -210,6 +237,12 @@ function onMouseDown(event) {
   panStartClientY = event.clientY
   panStartXDomain = [...currentXDomain]
   panStartYDomain = [...currentYDomain]
+  cachedDefaultDomains = getDefaultDomains()
+
+  // 平移拖曳開始時暫時關閉圓點滑鼠事件，徹底杜絕拖曳時 Tooltip 閃現
+  if (dotsGroup) {
+    dotsGroup.style('pointer-events', 'none')
+  }
 
   if (svgRef.value) {
     svgRef.value.style.cursor = 'grabbing'
@@ -227,6 +260,9 @@ function onGlobalMouseMove(event) {
     hasDragged = true
   }
 
+  // 🛡️ 全景未放大狀態下鎖定平移，防止圖表被拖離畫布產生大片空白
+  if (!isZoomed.value) return
+
   const rect = svgRef.value.getBoundingClientRect()
   const scaleX = rect.width / WIDTH
   const scaleY = rect.height / HEIGHT
@@ -239,44 +275,29 @@ function onGlobalMouseMove(event) {
   let newYMin = panStartYDomain[0] + dataDy
   let newYMax = panStartYDomain[1] + dataDy
 
-  // 邊界防跑出視野保護
-  const { xDom, yDom } = getDefaultDomains()
-  const spanX = panStartXDomain[1] - panStartXDomain[0]
-  const spanY = panStartYDomain[1] - panStartYDomain[0]
+  // 邊界防跑出視野保護：嚴格鎖定在全景範圍內（0% 溢出），防止使用者拖曳迷失在空白區
+  const { xDom, yDom } = cachedDefaultDomains || getDefaultDomains()
 
-  const minAllowedX = xDom[0] - spanX * 0.15
-  const maxAllowedX = xDom[1] + spanX * 0.15
-  const minAllowedY = yDom[0] - spanY * 0.15
-  const maxAllowedY = yDom[1] + spanY * 0.15
-
-  if (newXMin < minAllowedX) {
-    newXMax += (minAllowedX - newXMin)
-    newXMin = minAllowedX
+  if (newXMin < xDom[0]) {
+    newXMax += (xDom[0] - newXMin)
+    newXMin = xDom[0]
   }
-  if (newXMax > maxAllowedX) {
-    newXMin -= (newXMax - maxAllowedX)
-    newXMax = maxAllowedX
+  if (newXMax > xDom[1]) {
+    newXMin -= (newXMax - xDom[1])
+    newXMax = xDom[1]
   }
 
-  if (newYMin < minAllowedY) {
-    newYMax += (minAllowedY - newYMin)
-    newYMin = minAllowedY
+  if (newYMin < yDom[0]) {
+    newYMax += (yDom[0] - newYMin)
+    newYMin = yDom[0]
   }
-  if (newYMax > maxAllowedY) {
-    newYMin -= (newYMax - maxAllowedY)
-    newYMax = maxAllowedY
+  if (newYMax > yDom[1]) {
+    newYMin -= (newYMax - yDom[1])
+    newYMax = yDom[1]
   }
 
   currentXDomain = [newXMin, newXMax]
   currentYDomain = [newYMin, newYMax]
-
-  const isEssentiallyDefault = (
-    Math.abs(currentXDomain[0] - xDom[0]) < 1 &&
-    Math.abs(currentXDomain[1] - xDom[1]) < 1 &&
-    Math.abs(currentYDomain[0] - yDom[0]) < 0.5 &&
-    Math.abs(currentYDomain[1] - yDom[1]) < 0.5
-  )
-  isZoomed.value = !isEssentiallyDefault
 
   updateChart({ animate: false })
 }
@@ -289,6 +310,9 @@ function onGlobalMouseUp() {
   }
   setTimeout(() => {
     hasDragged = false
+    if (dotsGroup) {
+      dotsGroup.style('pointer-events', 'auto')
+    }
   }, 60)
 }
 
@@ -325,7 +349,7 @@ function onWheel(event) {
 
   // 1️⃣ 縮小（Zoom Out）極限保護：不可超越預設全景 [xDom[0], xDom[1]] 與 [yDom[0], yDom[1]]
   if (zoomFactor > 1) {
-    if (newSpanX >= defaultSpanX && newSpanY >= defaultSpanY) {
+    if (newSpanX >= defaultSpanX * 0.98 || newSpanY >= defaultSpanY * 0.98) {
       currentXDomain = [...xDom]
       currentYDomain = [...yDom]
       isZoomed.value = false
@@ -487,14 +511,16 @@ function updateChart(options = { animate: true }) {
     .attr('stroke-width', 1)
     .attr('cursor', 'pointer')
     .on('click', function (event, d) {
-      if (hasDragged) return
+      if (hasDragged || isPanning) return
       event.stopPropagation()
       emit('select-school', d.schoolName)
     })
     .on('mouseover', function (event, d) {
+      if (isPanning || hasDragged) return
       highlightTarget(d.schoolName, d)
     })
     .on('mouseleave', function () {
+      if (isPanning) return
       resetHighlight()
     })
 
@@ -628,6 +654,11 @@ onUnmounted(() => {
   }
   window.removeEventListener('mousemove', onGlobalMouseMove)
   window.removeEventListener('mouseup', onGlobalMouseUp)
+  window.removeEventListener('blur', onWindowBlur)
+  if (singleClickTimer) {
+    clearTimeout(singleClickTimer)
+    singleClickTimer = null
+  }
 })
 
 // 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
