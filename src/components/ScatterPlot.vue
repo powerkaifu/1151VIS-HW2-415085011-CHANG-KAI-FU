@@ -38,8 +38,8 @@ const props = defineProps({
 // 縮放狀態
 const isZoomed = ref(false)
 
-// 互動模式：'pan' (Photoshop 手掌平移，預設) | 'brush' (矩形框選放大)
-const interactionMode = ref('pan')
+// 是否按下 Shift 鍵（直接按住 Shift+拖曳即可框選放大，無需任何按鈕切換）
+let isShiftPressed = false
 
 // 計算篩選後是否有有效資料（用於 Empty State）
 const filteredCount = computed(() => {
@@ -180,6 +180,7 @@ function initChart() {
 
   brushGroup = mainG.append('g')
     .attr('class', 'brush-layer')
+    .style('pointer-events', 'none')
     .call(brush)
 
   // 7️⃣ 學校資料圓點層（裁切範圍內，避免縮放時溢出畫布）
@@ -202,39 +203,58 @@ function initChart() {
   // 8️⃣ 直接滾輪縮放監聽（以游標所在位置為中心平滑連續縮放）
   if (svgRef.value) {
     svgRef.value.addEventListener('wheel', onWheel, { passive: false })
+    svgRef.value.style.cursor = 'grab'
   }
 
-  // 9️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳）
+  // 9️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳，無需按鈕）
   svg.on('mousedown', onMouseDown)
   window.addEventListener('mousemove', onGlobalMouseMove)
   window.addEventListener('mouseup', onGlobalMouseUp)
-
-  applyInteractionModeStyles()
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('blur', onWindowBlur)
 
   isInitialized = true
 }
 
-// ========== 互動模式切換（Pan vs Brush） ==========
-function setInteractionMode(mode) {
-  interactionMode.value = mode
-  applyInteractionModeStyles()
+// ========== 鍵盤 Shift 切換框選特寫（Shift + Drag = Brush Zoom） ==========
+function onKeyDown(event) {
+  if (event.key === 'Shift' && !isShiftPressed) {
+    isShiftPressed = true
+    if (brushGroup) {
+      brushGroup.style('pointer-events', 'all')
+    }
+    if (svgRef.value && !isPanning) {
+      svgRef.value.style.cursor = 'crosshair'
+    }
+  }
 }
 
-function applyInteractionModeStyles() {
-  if (!brushGroup || !svgRef.value) return
-  if (interactionMode.value === 'pan') {
-    brushGroup.style('display', 'none')
-    brushGroup.call(brush.move, null)
+function onKeyUp(event) {
+  if (event.key === 'Shift') {
+    isShiftPressed = false
+    if (brushGroup) {
+      brushGroup.style('pointer-events', 'none')
+    }
+    if (svgRef.value && !isPanning) {
+      svgRef.value.style.cursor = 'grab'
+    }
+  }
+}
+
+function onWindowBlur() {
+  isShiftPressed = false
+  if (brushGroup) {
+    brushGroup.style('pointer-events', 'none')
+  }
+  if (svgRef.value && !isPanning) {
     svgRef.value.style.cursor = 'grab'
-  } else {
-    brushGroup.style('display', 'inline')
-    svgRef.value.style.cursor = 'crosshair'
   }
 }
 
 // ========== 手掌平移拖曳處理（Photoshop-like Pan & Drag） ==========
 function onMouseDown(event) {
-  if (interactionMode.value !== 'pan') return
+  if (event.shiftKey) return // 若按住 Shift 鍵，交由 Brush 圖層進行矩形框選
   if (event.button !== 0) return // 僅限滑鼠左鍵平移
 
   isPanning = true
@@ -318,7 +338,7 @@ function onGlobalMouseUp() {
   if (!isPanning) return
   isPanning = false
   if (svgRef.value) {
-    svgRef.value.style.cursor = interactionMode.value === 'pan' ? 'grab' : 'crosshair'
+    svgRef.value.style.cursor = isShiftPressed ? 'crosshair' : 'grab'
   }
   setTimeout(() => {
     hasDragged = false
@@ -453,6 +473,12 @@ function onBrushEnd(event) {
 
   // 清除灰色框選遮罩
   brushGroup.call(brush.move, null)
+  if (!isShiftPressed) {
+    brushGroup.style('pointer-events', 'none')
+    if (svgRef.value) {
+      svgRef.value.style.cursor = 'grab'
+    }
+  }
 
   isZoomed.value = true
   updateChart({ animate: true })
@@ -708,6 +734,9 @@ onUnmounted(() => {
   }
   window.removeEventListener('mousemove', onGlobalMouseMove)
   window.removeEventListener('mouseup', onGlobalMouseUp)
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('blur', onWindowBlur)
 })
 
 // 學年度切換：平滑還原全景縮放，各校圓點補間滑動至新年度座標
@@ -748,47 +777,23 @@ watch(() => props.data, () => {
         </div>
         <p class="chart-subtitle">
           懸停查看學校明細 · <span class="highlight-action">點擊任一點查看歷年走勢</span> ·
-          <span class="brush-hint">
-            {{ interactionMode === 'pan' ? '按住左鍵「手掌平移」· 滾動滾輪「放大縮小」' : '按住左鍵「框選矩形特寫」· 滾動滾輪「放大縮小」' }}
+          <span class="direct-hint">
+            🖱️ <strong>直接互動：</strong>滾輪縮放 · 拖曳平移 · Shift+拖曳框選 · 雙擊重設全景
           </span>
         </p>
       </div>
 
       <!-- 卡片頂部圖例與控制項 -->
       <div class="header-right">
-        <!-- 互動模式切換（Photoshop 手掌平移 vs 矩形框選放大） -->
-        <div class="mode-toggle">
-          <button
-            type="button"
-            class="mode-btn"
-            :class="{ active: interactionMode === 'pan' }"
-            title="手掌平移模式：按住滑鼠左鍵拖曳移動視野，滾動滾輪放大縮小（宛如 Photoshop）"
-            @click="setInteractionMode('pan')"
-          >
-            <span class="mode-icon">✋</span>
-            手掌平移
-          </button>
-          <button
-            type="button"
-            class="mode-btn"
-            :class="{ active: interactionMode === 'brush' }"
-            title="矩形框選模式：按住滑鼠左鍵拉出矩形框特寫放大"
-            @click="setInteractionMode('brush')"
-          >
-            <span class="mode-icon">⛶</span>
-            框選放大
-          </button>
-        </div>
-
-        <!-- ⟲ 重設縮放按鈕 -->
+        <!-- ⟲ 重設縮放按鈕（僅在特寫時出現） -->
         <button
           v-if="isZoomed"
           class="reset-zoom-btn"
-          title="雙擊畫布或點擊此處還原全景"
+          title="雙擊畫布空白處或點擊此處還原全景"
           @click="resetZoom"
         >
           <span class="btn-icon">⟲</span>
-          重設縮放 (Reset Zoom)
+          重設全景 (Reset Zoom)
         </button>
 
         <div class="header-legend">
@@ -893,9 +898,22 @@ watch(() => props.data, () => {
   font-weight: 600;
 }
 
-.brush-hint {
-  color: #0d9488;
-  font-weight: 600;
+.direct-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.direct-hint strong {
+  color: #1e293b;
+  font-weight: 700;
 }
 
 /* 卡片右上方圖例與狀態列 */
@@ -904,48 +922,6 @@ watch(() => props.data, () => {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-}
-
-/* 互動模式切換按鈕群（Photoshop 質感） */
-.mode-toggle {
-  display: inline-flex;
-  align-items: center;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-}
-
-.mode-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  color: #475569;
-  border: none;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  line-height: 1.2;
-}
-
-.mode-btn:hover {
-  color: #0f172a;
-}
-
-.mode-btn.active {
-  background: #ffffff;
-  color: #2563eb;
-  font-weight: 700;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.mode-icon {
-  font-size: 15px;
 }
 
 /* ⟲ 重設縮放按鈕 */
