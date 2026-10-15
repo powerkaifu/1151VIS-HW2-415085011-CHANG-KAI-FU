@@ -299,6 +299,7 @@ function clearSelectedSchool() {
 						:selected-school="selectedSchool"
 						:school-history="currentSchoolHistory"
 						:danger-threshold="THRESHOLD_DANGER"
+						@select-year="(year) => (selectedYear = year)"
 						@clear-school="clearSelectedSchool"
 					/>
 				</div>

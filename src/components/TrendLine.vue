@@ -1,7 +1,10 @@
 <script setup>
 import * as d3 from 'd3'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { COLOR_MAP } from '../composables/useEnrollmentData.js'
+
+// ========== Emits ==========
+const emit = defineEmits(['select-year', 'clear-school'])
 
 // ========== Props ==========
 const props = defineProps({
@@ -34,6 +37,7 @@ const props = defineProps({
 
 // ========== DOM 參照 ==========
 const svgRef = ref(null)
+const tooltipRef = ref(null)
 
 // ========== 圖表常數（Margin Convention） ==========
 const MARGIN = { top: 36, right: 38, bottom: 56, left: 62 }
@@ -87,10 +91,19 @@ function render() {
 	g.select('.grid-lines .domain').remove()
 
 	// 3️⃣ 坐標軸
-	g.append('g')
+	const xAxisG = g.append('g')
 		.attr('class', 'x-axis')
 		.attr('transform', `translate(0,${INNER_H})`)
 		.call(d3.axisBottom(xScale).tickFormat((y) => `${y}`))
+
+	// 增強 X 軸刻度文字互動性（支援點選與懸停反饋）
+	xAxisG.selectAll('.tick text')
+		.style('cursor', 'pointer')
+		.attr('class', (y) => (y === props.selectedYear ? 'tick-text active' : 'tick-text'))
+		.on('click', (event, y) => {
+			event.stopPropagation()
+			emit('select-year', y)
+		})
 
 	g.append('g')
 		.attr('class', 'y-axis')
@@ -109,7 +122,7 @@ function render() {
 		.attr('fill', '#475569')
 		.attr('font-size', 'var(--font-xs)')
 		.attr('font-weight', '600')
-		.text('學年度')
+		.text('學年度（點擊刻度或年份切換全站檢視）')
 
 	g.append('text')
 		.attr('transform', 'rotate(-90)')
@@ -151,6 +164,7 @@ function render() {
 		// 平滑折線
 		g.append('path')
 			.datum(lineData)
+			.attr('class', `line-${ownership}`)
 			.attr('fill', 'none')
 			.attr('stroke', color)
 			.attr('stroke-width', 2.5)
@@ -161,10 +175,10 @@ function render() {
 		g.selectAll(`.dot-${ownership}`)
 			.data(lineData)
 			.join('circle')
-			.attr('class', `dot-${ownership}`)
+			.attr('class', (d) => `dot-trend dot-${ownership} dot-year-${d.year}`)
 			.attr('cx', (d) => xScale(d.year))
 			.attr('cy', (d) => yScale(d.avgRate))
-			.attr('r', (d) => (d.year === props.selectedYear ? 6 : 3.5))
+			.attr('r', (d) => (d.year === props.selectedYear ? 6.5 : 3.5))
 			.attr('fill', (d) => (d.year === props.selectedYear ? color : '#ffffff'))
 			.attr('stroke', color)
 			.attr('stroke-width', (d) => (d.year === props.selectedYear ? 2.5 : 1.8))
@@ -197,6 +211,7 @@ function render() {
 		// 專屬折線
 		g.append('path')
 			.datum(props.schoolHistory)
+			.attr('class', 'line-school')
 			.attr('fill', 'none')
 			.attr('stroke', schoolColor)
 			.attr('stroke-width', 3.2)
@@ -206,10 +221,10 @@ function render() {
 		g.selectAll('.dot-school')
 			.data(props.schoolHistory)
 			.join('circle')
-			.attr('class', 'dot-school')
+			.attr('class', (d) => `dot-trend dot-school dot-year-${d.year}`)
 			.attr('cx', (d) => xScale(d.year))
 			.attr('cy', (d) => yScale(d.rate))
-			.attr('r', (d) => (d.year === props.selectedYear ? 8 : 5))
+			.attr('r', (d) => (d.year === props.selectedYear ? 8.5 : 5))
 			.attr('fill', schoolColor)
 			.attr('stroke', '#ffffff')
 			.attr('stroke-width', 2.2)
@@ -234,34 +249,213 @@ function render() {
 		}
 	}
 
-	// 9️⃣ 選取學年度的垂直指示線
+	// 9️⃣ 選取學年度的固定垂直指示線
 	const curX = xScale(props.selectedYear)
 	if (curX !== undefined) {
 		g.append('line')
+			.attr('class', 'selected-year-line')
 			.attr('x1', curX)
 			.attr('x2', curX)
 			.attr('y1', 0)
 			.attr('y2', INNER_H)
 			.attr('stroke', 'rgba(37, 99, 235, 0.45)')
-			.attr('stroke-width', 1)
-			.attr('stroke-dasharray', '2,3')
+			.attr('stroke-width', 1.5)
+			.attr('stroke-dasharray', '3,3')
+	}
+
+	// 🔟 🌟 滑鼠懸停互動層（Hover Guideline + Crosshair Snapping + 數值 Tooltip）
+	const hoverGroup = g.append('g').attr('class', 'hover-group').style('pointer-events', 'none')
+
+	const hoverLine = hoverGroup.append('line')
+		.attr('class', 'hover-guide-line')
+		.attr('y1', 0)
+		.attr('y2', INNER_H)
+		.attr('stroke', '#2563eb')
+		.attr('stroke-width', 1.5)
+		.attr('stroke-dasharray', '4,3')
+		.style('opacity', 0)
+
+	// 透明全畫布事件覆蓋矩形
+	g.append('rect')
+		.attr('class', 'interactive-overlay')
+		.attr('x', 0)
+		.attr('y', 0)
+		.attr('width', INNER_W)
+		.attr('height', INNER_H)
+		.attr('fill', 'transparent')
+		.style('cursor', 'pointer')
+		.on('mousemove', onOverlayMouseMove)
+		.on('mouseleave', onOverlayMouseLeave)
+		.on('click', onOverlayClick)
+
+	let currentHoverYear = null
+
+	function getNearestYear(mouseX) {
+		let closestYear = years[0]
+		let minDiff = Infinity
+		for (const y of years) {
+			const xPos = xScale(y)
+			const diff = Math.abs(xPos - mouseX)
+			if (diff < minDiff) {
+				minDiff = diff
+				closestYear = y
+			}
+		}
+		return closestYear
+	}
+
+	function onOverlayMouseMove(event) {
+		const [mouseX] = d3.pointer(event)
+		const nearestYear = getNearestYear(mouseX)
+		currentHoverYear = nearestYear
+
+		const snapX = xScale(nearestYear)
+		if (snapX === undefined) return
+
+		// 顯示懸停垂直引導線
+		hoverLine
+			.attr('x1', snapX)
+			.attr('x2', snapX)
+			.style('opacity', 1)
+
+		// 高亮對應年份的圓點，淡化其他年份
+		g.selectAll('.dot-trend')
+			.style('transition', 'r 0.15s ease, opacity 0.15s ease')
+			.attr('opacity', 0.25)
+
+		g.selectAll(`.dot-year-${nearestYear}`)
+			.attr('opacity', 1)
+			.attr('r', function () {
+				const isSchool = d3.select(this).classed('dot-school')
+				return isSchool ? 9 : 7
+			})
+			.style('filter', 'drop-shadow(0 0 5px rgba(37, 99, 235, 0.6))')
+
+		// 顯示 Tooltip
+		showTrendTooltip(nearestYear, snapX)
+	}
+
+	function onOverlayMouseLeave() {
+		currentHoverYear = null
+		hoverLine.style('opacity', 0)
+
+		// 恢復圓點預設尺寸與透明度
+		g.selectAll('.dot-trend')
+			.style('filter', 'none')
+			.attr('opacity', 1)
+
+		g.selectAll('.dot-public')
+			.attr('r', (d) => (d.year === props.selectedYear ? 6.5 : 3.5))
+
+		g.selectAll('.dot-private')
+			.attr('r', (d) => (d.year === props.selectedYear ? 6.5 : 3.5))
+
+		g.selectAll('.dot-school')
+			.attr('r', (d) => (d.year === props.selectedYear ? 8.5 : 5))
+
+		hideTrendTooltip()
+	}
+
+	function onOverlayClick() {
+		if (currentHoverYear) {
+			emit('select-year', currentHoverYear)
+		}
+	}
+}
+
+// ========== Tooltip 顯示與定位 ==========
+function showTrendTooltip(year, snapX) {
+	if (!tooltipRef.value || !svgRef.value) return
+
+	const pub = props.trendData.find((d) => d.year === year && d.ownership === '公立')
+	const pri = props.trendData.find((d) => d.year === year && d.ownership === '私立')
+	const school = props.schoolHistory.find((d) => d.year === year)
+
+	const gap = pub && pri ? Math.abs(pub.avgRate - pri.avgRate).toFixed(1) : null
+	const isCurrent = year === props.selectedYear
+
+	const tipEl = d3.select(tooltipRef.value)
+	tipEl
+		.style('opacity', 1)
+		.html(`
+			<div class="tip-header">
+				<span class="tip-title">📅 ${year} 學年度</span>
+				<span class="tip-badge ${isCurrent ? 'active' : ''}">${isCurrent ? '目前檢視中' : '點擊切換'}</span>
+			</div>
+			<div class="tip-divider"></div>
+			<div class="tip-grid">
+				<span class="tip-lbl" style="color: #93c5fd;">● 公立平均</span>
+				<span class="tip-val" style="color: #60a5fa; font-weight:700;">${pub ? pub.avgRate.toFixed(1) + '%' : '-'}</span>
+				<span class="tip-lbl" style="color: #fdba74;">● 私立平均</span>
+				<span class="tip-val" style="color: #fb923c; font-weight:700;">${pri ? pri.avgRate.toFixed(1) + '%' : '-'}</span>
+				${
+					gap
+						? `
+					<span class="tip-lbl">公私立差距</span>
+					<span class="tip-val highlight">${gap} 個百分點</span>
+				`
+						: ''
+				}
+				${
+					school
+						? `
+					<span class="tip-lbl" style="color: #c084fc;">★ ${cleanName(props.selectedSchool)}</span>
+					<span class="tip-val" style="color: #d8b4fe; font-weight:700;">${school.rate.toFixed(2)}%</span>
+				`
+						: ''
+				}
+			</div>
+			<div class="tip-action-hint">👆 點擊切換至 ${year} 學年度資料</div>
+		`)
+
+	const svgEl = svgRef.value
+	const rect = svgEl.getBoundingClientRect()
+	const scaleX = rect.width / WIDTH
+
+	const realX = (snapX + MARGIN.left) * scaleX
+	const tipWidth = Math.min(280, rect.width - 24)
+
+	let left = realX + 16
+	if (left + tipWidth > rect.width - 12) {
+		left = realX - tipWidth - 16
+	}
+	if (left < 12) left = 12
+
+	const top = 32
+
+	tipEl
+		.style('left', `${left}px`)
+		.style('top', `${top}px`)
+}
+
+function hideTrendTooltip() {
+	if (tooltipRef.value) {
+		d3.select(tooltipRef.value).style('opacity', 0)
 	}
 }
 
 watch(() => [props.trendData, props.selectedYear, props.schoolHistory, props.selectedSchool], render, { deep: false })
+
 onMounted(render)
+
+onUnmounted(() => {
+	hideTrendTooltip()
+})
 </script>
 
 <template>
 	<div class="trend-card">
 		<div class="card-header">
 			<div class="header-left">
-				<h3 class="chart-title">106～114 學年度公私立平均新生註冊率趨勢</h3>
+				<div class="title-row">
+					<h3 class="chart-title">106～114 學年度公私立平均新生註冊率趨勢</h3>
+				</div>
 				<p class="chart-subtitle">
 					<span v-if="selectedSchool" class="active-school-text">
-						已鎖定：<strong>{{ cleanName(selectedSchool) }}</strong> 9 年歷年走勢對照
+						已鎖定：<strong>{{ cleanName(selectedSchool) }}</strong> 9 年歷年走勢對照 ·
 					</span>
-					<span v-else> 全台大專公私立平均對比 </span>
+					<span>全台大專公私立平均對比 · </span>
+					<span class="interactive-hint">🖱️ 懸停查看各年公私立對比 · 點擊年份切換全站學年度</span>
 				</p>
 			</div>
 
@@ -284,6 +478,9 @@ onMounted(render)
 
 		<div class="canvas-wrapper">
 			<svg ref="svgRef" :width="1000" :height="420" viewBox="0 0 1000 420" class="chart-svg" />
+
+			<!-- 現代深色毛玻璃 Tooltip -->
+			<div ref="tooltipRef" class="modern-tooltip" />
 		</div>
 
 		<!-- 鎖定單一學校時保留底部專屬細節觀察 -->
@@ -324,11 +521,18 @@ onMounted(render)
 	min-width: 280px;
 }
 
+.title-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 4px;
+}
+
 .chart-title {
 	font-size: var(--font-md);
 	font-weight: 700;
 	color: #0f172a;
-	margin: 0 0 4px 0;
+	margin: 0;
 	letter-spacing: -0.01em;
 }
 
@@ -336,6 +540,18 @@ onMounted(render)
 	font-size: var(--font-xs);
 	color: #475569;
 	margin: 0;
+	line-height: 1.5;
+}
+
+.interactive-hint {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: #f1f5f9;
+	color: #334155;
+	padding: 2px 8px;
+	border-radius: 6px;
+	font-weight: 500;
 }
 
 .active-school-text strong {
@@ -382,10 +598,6 @@ onMounted(render)
 	line-height: 1.4;
 }
 
-.insight-summary strong {
-	color: #0f172a;
-}
-
 .clear-school-btn {
 	background: #f1f5f9;
 	border: 1px solid #cbd5e1;
@@ -404,6 +616,7 @@ onMounted(render)
 }
 
 .canvas-wrapper {
+	position: relative;
 	width: 100%;
 	overflow: hidden; /* 🛡️ 徹底禁止畫布內部產生任何水平或垂直捲動軸 */
 }
@@ -412,6 +625,99 @@ onMounted(render)
 	display: block;
 	width: 100%;
 	height: auto;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* 現代深色毛玻璃 Tooltip */
+.modern-tooltip {
+	position: absolute;
+	pointer-events: none;
+	opacity: 0;
+	background: rgba(15, 23, 42, 0.95);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+	color: #f8fafc;
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 8px;
+	padding: 12px 14px;
+	font-size: var(--font-xs);
+	line-height: 1.5;
+	box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+	transition: opacity 0.15s ease;
+	z-index: 50;
+	width: min(280px, calc(100vw - 48px));
+	box-sizing: border-box;
+}
+
+:deep(.tip-header) {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 4px;
+}
+
+:deep(.tip-title) {
+	font-weight: 700;
+	font-size: var(--font-base);
+	color: #ffffff;
+}
+
+:deep(.tip-badge) {
+	flex-shrink: 0;
+	white-space: nowrap;
+	font-size: var(--font-xs);
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 4px;
+	background: rgba(255, 255, 255, 0.1);
+	color: #94a3b8;
+}
+
+:deep(.tip-badge.active) {
+	background: #2563eb;
+	color: #ffffff;
+}
+
+:deep(.tip-divider) {
+	height: 1px;
+	background: rgba(255, 255, 255, 0.12);
+	margin-bottom: 8px;
+}
+
+:deep(.tip-grid) {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 6px 14px;
+}
+
+:deep(.tip-lbl) {
+	color: #94a3b8;
+	font-size: var(--font-xs);
+}
+
+:deep(.tip-val) {
+	text-align: right;
+	font-weight: 600;
+	color: #f8fafc;
+	font-size: var(--font-xs);
+	font-variant-numeric: tabular-nums;
+}
+
+:deep(.tip-val.highlight) {
+	font-size: var(--font-sm);
+	font-weight: 700;
+	color: #fcd34d;
+}
+
+:deep(.tip-action-hint) {
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px dashed rgba(255, 255, 255, 0.18);
+	font-size: var(--font-xs);
+	color: #93c5fd;
+	text-align: center;
 }
 
 .trend-insight {
@@ -465,19 +771,21 @@ onMounted(render)
 	color: #c2410c;
 }
 
-.insight-text {
-	color: #475569;
-}
-
-.insight-text strong {
-	color: #0f172a;
-}
-
 :deep(.x-axis text),
 :deep(.y-axis text) {
 	font-size: var(--font-xs);
 	font-weight: 500;
 	fill: #475569;
+}
+
+:deep(.x-axis text.tick-text:hover) {
+	fill: #2563eb;
+	font-weight: 700;
+}
+
+:deep(.x-axis text.tick-text.active) {
+	fill: #2563eb;
+	font-weight: 700;
 }
 
 :deep(.x-axis path),

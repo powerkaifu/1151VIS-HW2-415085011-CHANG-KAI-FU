@@ -192,6 +192,9 @@ function initChart() {
     if (event.target.tagName !== 'circle') {
       if (singleClickTimer) clearTimeout(singleClickTimer)
       singleClickTimer = setTimeout(() => {
+        if (props.selectedSchool) {
+          emit('select-school', '')
+        }
         resetHighlight()
         singleClickTimer = null
       }, 220)
@@ -514,6 +517,7 @@ function updateChart(options = { animate: true }) {
       if (hasDragged || isPanning) return
       event.stopPropagation()
       emit('select-school', d.schoolName)
+      highlightTarget(d.schoolName, d)
     })
     .on('mouseover', function (event, d) {
       if (isPanning || hasDragged) return
