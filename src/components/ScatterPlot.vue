@@ -205,7 +205,6 @@ function initChart() {
   // 7️⃣ 直接滾輪縮放監聽（以游標所在位置為中心平滑連續縮放）
   if (svgRef.value) {
     svgRef.value.addEventListener('wheel', onWheel, { passive: false })
-    svgRef.value.style.cursor = 'grab'
   }
 
   // 8️⃣ 手掌平移拖曳監聽（Photoshop 式流暢拖曳）
@@ -217,21 +216,18 @@ function initChart() {
   isInitialized = true
 }
 
-// ========== 視窗失去焦點保護（防止滑鼠按住切換視窗時游標殘留） ==========
+// ========== 視窗失去焦點保護（防止滑鼠按住切換視窗時狀態殘留） ==========
 function onWindowBlur() {
   if (isPanning) {
     isPanning = false
     hasDragged = false
-    if (svgRef.value) {
-      svgRef.value.style.cursor = 'grab'
-    }
     if (dotsGroup) {
       dotsGroup.style('pointer-events', 'auto')
     }
   }
 }
 
-// ========== 手掌平移拖曳處理（Photoshop-like Pan & Drag） ==========
+// ========== 拖曳平移處理（Pan & Drag） ==========
 function onMouseDown(event) {
   if (event.button !== 0) return // 僅限滑鼠左鍵平移
 
@@ -242,10 +238,6 @@ function onMouseDown(event) {
   panStartXDomain = [...currentXDomain]
   panStartYDomain = [...currentYDomain]
   cachedDefaultDomains = getDefaultDomains()
-
-  if (svgRef.value) {
-    svgRef.value.style.cursor = 'grabbing'
-  }
 }
 
 function onGlobalMouseMove(event) {
@@ -308,9 +300,6 @@ function onGlobalMouseMove(event) {
 function onGlobalMouseUp() {
   if (!isPanning) return
   isPanning = false
-  if (svgRef.value) {
-    svgRef.value.style.cursor = 'grab'
-  }
   if (dotsGroup) {
     dotsGroup.style('pointer-events', 'auto')
   }
