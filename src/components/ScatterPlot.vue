@@ -221,6 +221,9 @@ function onWindowBlur() {
   if (isPanning) {
     isPanning = false
     hasDragged = false
+    if (svgRef.value) {
+      svgRef.value.style.cursor = 'default'
+    }
     if (dotsGroup) {
       dotsGroup.style('pointer-events', 'auto')
     }
@@ -253,6 +256,11 @@ function onGlobalMouseMove(event) {
       dotsGroup.style('pointer-events', 'none')
     }
     hideTooltip()
+
+    // 🌟 僅在有放大特寫且實際拖動的當下，才出現抓取手掌反饋
+    if (isZoomed.value && svgRef.value) {
+      svgRef.value.style.cursor = 'grabbing'
+    }
   }
 
   // 🛡️ 全景未放大狀態下鎖定平移，防止圖表被拖離畫布產生大片空白
@@ -300,6 +308,10 @@ function onGlobalMouseMove(event) {
 function onGlobalMouseUp() {
   if (!isPanning) return
   isPanning = false
+  // 拖動放開，立即恢復原本正常的滑鼠游標
+  if (svgRef.value) {
+    svgRef.value.style.cursor = 'default'
+  }
   if (dotsGroup) {
     dotsGroup.style('pointer-events', 'auto')
   }
