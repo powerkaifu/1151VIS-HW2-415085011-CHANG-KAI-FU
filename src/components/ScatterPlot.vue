@@ -322,6 +322,9 @@ function onGlobalMouseUp() {
 
 // ========== 滾輪連續縮放（Direct Mouse Wheel Zooming） ==========
 function onWheel(event) {
+  // 🌟 若已鎖定特定學校，讓滑鼠滾輪正常捲動網頁視窗捲軸，方便向下瀏覽折線圖走勢
+  if (props.selectedSchool) return
+
   if (!xScale || !yScale || !mainG) return
   event.preventDefault()
   hideTooltip()
@@ -520,8 +523,13 @@ function updateChart(options = { animate: true }) {
     .on('click', function (event, d) {
       if (hasDragged) return
       event.stopPropagation()
-      emit('select-school', d.schoolName)
-      highlightTarget(d.schoolName, d)
+      if (props.selectedSchool === d.schoolName) {
+        emit('select-school', '')
+        resetHighlight()
+      } else {
+        emit('select-school', d.schoolName)
+        highlightTarget(d.schoolName, d)
+      }
     })
     .on('mouseover', function (event, d) {
       if (hasDragged) return
@@ -569,7 +577,7 @@ function showTooltip(d) {
         <span class="tip-lbl">名額差額</span>
         <span class="tip-val">${d.deficit !== null ? (d.deficit > 0 ? `-${d.deficit.toLocaleString()}` : '0') : '無'} 人</span>
       </div>
-      <div class="tip-action-hint">👆 點擊查看 9 年歷年走勢</div>
+      <div class="tip-action-hint">${props.selectedSchool === d.schoolName ? '👆 再次點擊解除鎖定' : '👆 點擊查看 9 年歷年走勢'}</div>
     `)
 
   const svgEl = svgRef.value
